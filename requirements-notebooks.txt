@@ -1,0 +1,18 @@
+# Notebook-only dependencies
+# Install these when working with notebooks/eda.ipynb or
+# notebooks/complaint_air_correlation.ipynb.
+#
+# Usage:
+#   pip install -r requirements-notebooks.txt
+#
+# Note: requirements.txt (the app/Docker deps) is NOT duplicated here.
+#       Install both if running notebooks in the same environment:
+#   pip install -r requirements.txt -r requirements-notebooks.txt
+jupyter>=1.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+scipy>=1.10.0
+statsmodels>=0.14.0
+geopandas>=0.14.0
+wordcloud>=1.9.0
+scikit-learn>=1.3.0
