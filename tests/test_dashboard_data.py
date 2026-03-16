@@ -4,8 +4,10 @@ import pytest
 from streamlit_app.dashboard_data import (
     build_city_daily_metrics,
     build_neighborhood_metrics,
+    build_sensor_snapshot,
     compute_lag_correlations,
     compute_spike_concordance,
+    enrich_neighborhood_metrics_with_estimates,
     filter_merged_data,
 )
 
@@ -37,6 +39,56 @@ def _sample_summary() -> pd.DataFrame:
             "total_complaints": [4, 6, 0],
         }
     )
+
+
+def _sample_geojson() -> dict:
+    return {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "properties": {"neighborhood": "A", "neighborhood_secondary": "A2"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [-87.62, 41.08],
+                        [-87.58, 41.08],
+                        [-87.58, 41.12],
+                        [-87.62, 41.12],
+                        [-87.62, 41.08],
+                    ]],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"neighborhood": "B", "neighborhood_secondary": "B2"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [-87.72, 41.18],
+                        [-87.68, 41.18],
+                        [-87.68, 41.22],
+                        [-87.72, 41.22],
+                        [-87.72, 41.18],
+                    ]],
+                },
+            },
+            {
+                "type": "Feature",
+                "properties": {"neighborhood": "C", "neighborhood_secondary": "C2"},
+                "geometry": {
+                    "type": "Polygon",
+                    "coordinates": [[
+                        [-87.67, 41.13],
+                        [-87.63, 41.13],
+                        [-87.63, 41.17],
+                        [-87.67, 41.17],
+                        [-87.67, 41.13],
+                    ]],
+                },
+            },
+        ],
+    }
 
 
 def test_filter_merged_data_applies_date_and_neighborhood_filters() -> None:
@@ -97,3 +149,47 @@ def test_compute_spike_concordance_returns_expected_window_and_baseline() -> Non
     center = spike_df.loc[spike_df["offset_day"] == 0, "mean_complaints"].iloc[0]
     assert center == pytest.approx(5.0)
     assert baseline == pytest.approx(2.5)
+
+
+def test_enrich_neighborhood_metrics_with_estimates_fills_uncovered_neighborhoods() -> None:
+    base_metrics = build_neighborhood_metrics(_sample_summary(), _sample_merged())
+    sensors = build_sensor_snapshot(_sample_merged())
+
+    enriched = enrich_neighborhood_metrics_with_estimates(
+        neighborhood_metrics=base_metrics,
+        sensors=sensors,
+        neighborhoods_geojson=_sample_geojson(),
+        k=2,
+        idw_power=2.0,
+        max_distance_km=50.0,
+    )
+
+    row_a = enriched.loc[enriched["neighborhood"] == "A"].iloc[0]
+    row_c = enriched.loc[enriched["neighborhood"] == "C"].iloc[0]
+
+    assert row_a["coverage_source"] == "direct"
+    assert row_a["pm25_map_value"] == pytest.approx(row_a["pm25_mean_period"])
+
+    assert row_c["coverage_source"] == "estimated_idw"
+    assert not pd.isna(row_c["pm25_map_value"])
+    assert not pd.isna(row_c["no2_map_value"])
+    assert not pd.isna(row_c["complaints_map_value"])
+    assert row_c["estimated_sensor_count"] > 0
+
+
+def test_enrich_neighborhood_metrics_with_estimates_marks_unavailable_when_no_nearby_sensor() -> None:
+    base_metrics = build_neighborhood_metrics(_sample_summary(), _sample_merged())
+    sensors = build_sensor_snapshot(_sample_merged())
+
+    enriched = enrich_neighborhood_metrics_with_estimates(
+        neighborhood_metrics=base_metrics,
+        sensors=sensors,
+        neighborhoods_geojson=_sample_geojson(),
+        k=2,
+        idw_power=2.0,
+        max_distance_km=0.1,
+    )
+
+    row_c = enriched.loc[enriched["neighborhood"] == "C"].iloc[0]
+    assert row_c["coverage_source"] == "unavailable"
+    assert pd.isna(row_c["pm25_map_value"])
