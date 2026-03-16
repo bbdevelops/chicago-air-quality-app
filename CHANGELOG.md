@@ -1,5 +1,24 @@
 # Changelog — Chicago Air Quality Project
 
+## 2026-03-16 — Dual Map Modes & Neighborhood Placeholder Estimates
+
+### Added
+- **Dual map modes in Streamlit**: `Neighborhood choropleth` (default) and `Continuous heatmap`
+- **IDW placeholder estimation** for neighborhoods without direct sensor-period values
+- **Coverage metadata fields** in dashboard metrics:
+	- `coverage_source` (`direct`, `estimated_idw`, `unavailable`)
+	- `estimated_sensor_count`
+	- `estimated_nearest_km`
+- **Neighborhood boundary overlay** in continuous heatmap mode for geographic orientation
+
+### Changed
+- **Choropleth rendering** now uses map-value columns that preserve direct measurements and only apply estimated values where direct period metrics are missing
+- **Coverage QA tab** now surfaces direct vs estimated status and estimation diagnostics
+
+### Testing
+- Added dashboard tests for IDW enrichment behavior and unavailable fallback behavior in `tests/test_dashboard_data.py`
+- Full test suite passing after feature integration
+
 ## 2026-02-28 — Pipeline Cleanup & Documentation
 
 ### Added

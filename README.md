@@ -130,11 +130,28 @@ using the same pipeline outputs in `data/clean/`:
 
 ### Features
 
+- Dual map modes: **Neighborhood choropleth** (default) and **Continuous heatmap**
 - Neighborhood polygon overlay from `chicago_neighborhoods.geojson`
 - Sensor marker overlay (PM2.5 and complaint totals)
+- IDW placeholder estimates for neighborhoods with no direct sensor-period values
 - Dual-axis daily trend chart (PM2.5 vs complaints)
 - Lead-lag correlation chart and spike-window concordance view
-- Coverage QA tab to verify neighborhoods with no sensor coverage are handled safely
+- Coverage QA tab with `coverage_source` diagnostics (`direct`, `estimated_idw`, `unavailable`)
+
+### Map Modes and Coverage Logic
+
+- **Neighborhood choropleth**
+	- Colors polygons using direct period metrics where available.
+	- For neighborhoods without direct period coverage, the app computes placeholder values
+		from nearby sensors using **inverse-distance weighting (IDW)**.
+	- Hover fields and Coverage QA explicitly indicate whether a value is direct or estimated.
+
+- **Continuous heatmap**
+	- Renders a sensor-driven density surface for the selected metric.
+	- Neighborhood boundaries are overlaid for orientation, but color is not constrained by polygon fill.
+
+- **QA transparency**
+	- The Coverage QA tab includes estimation metadata such as nearby sensor count and nearest sensor distance.
 
 ### Run locally
 
@@ -173,6 +190,7 @@ Unit tests are under `tests/` and target core pipeline and analytics logic:
 - neighborhood point-in-polygon / snap fallback logic
 - hourly-to-daily weighted re-aggregation logic
 - Streamlit analytics functions (filters, aggregations, lag metrics, spike windows)
+- neighborhood IDW estimation logic and unavailable-fallback behavior
 
 Run tests:
 
