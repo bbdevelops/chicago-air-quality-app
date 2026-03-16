@@ -1,5 +1,28 @@
 # Changelog — Chicago Air Quality Project
 
+## 2026-03-16 — Map Overlay Controls, Legend Readability, and MapLibre Migration
+
+### Added
+- **Map layer toggles** for sensor markers and complaint locations in the Neighborhood Map tab
+- **Complaint location overlay** using filtered geocoded complaint points
+- **Complaint-size legend helper bins** that choose visually distinct marker-size steps
+
+### Changed
+- **Sensor marker sizing** remains complaint-driven and now uses clearer legend labeling for interpretability
+- **Legend styling** updated for high contrast and improved readability on map backgrounds
+- **Plotly map rendering migrated to MapLibre APIs**:
+	- `choropleth_mapbox` -> `choropleth_map`
+	- `density_mapbox` -> `density_map`
+	- `Scattermapbox` -> `Scattermap`
+	- `mapbox_style` -> `map_style`
+
+### Fixed
+- **Runtime error fix**: removed unsupported `marker.line` usage on map marker legend traces
+- **Deprecation cleanup**: eliminated Plotly Mapbox deprecation warnings in the Streamlit app
+
+### Testing
+- Full test suite passing after map overlay and migration updates
+
 ## 2026-03-16 — Dual Map Modes & Neighborhood Placeholder Estimates
 
 ### Added
