@@ -8,6 +8,7 @@ from streamlit_app.dashboard_data import (
     compute_lag_correlations,
     compute_spike_concordance,
     enrich_neighborhood_metrics_with_estimates,
+    filter_complaint_points,
     filter_merged_data,
 )
 
@@ -37,6 +38,19 @@ def _sample_summary() -> pd.DataFrame:
             "reading_days": [2, 2, 0],
             "has_sensor_coverage": [1, 1, 0],
             "total_complaints": [4, 6, 0],
+        }
+    )
+
+
+def _sample_complaints() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "complaint_id": [101, 102, 103],
+            "date": pd.to_datetime(["2026-01-01", "2026-01-02", "2026-01-02"]),
+            "latitude": [41.11, 41.21, pd.NA],
+            "longitude": [-87.61, -87.71, -87.72],
+            "neighborhood": ["A", "B", "B"],
+            "nearest_sensor": ["S1", "S2", "S2"],
         }
     )
 
@@ -109,6 +123,19 @@ def test_build_city_daily_metrics_aggregates_sensor_rows_to_city_day() -> None:
 
     assert list(city["complaint_count"]) == [3, 7]
     assert list(city["pm25_mean"]) == [15.0, 35.0]
+
+
+def test_filter_complaint_points_applies_date_neighborhood_and_geocode_filters() -> None:
+    complaints = _sample_complaints()
+    filtered = filter_complaint_points(
+        complaints,
+        start_date=pd.Timestamp("2026-01-02"),
+        end_date=pd.Timestamp("2026-01-02"),
+        neighborhoods=["B"],
+    )
+
+    assert len(filtered) == 1
+    assert filtered.iloc[0]["complaint_id"] == 102
 
 
 def test_build_neighborhood_metrics_preserves_neighborhoods_without_data() -> None:

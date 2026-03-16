@@ -12,6 +12,7 @@ from shapely.geometry import shape
 
 @dataclass(frozen=True)
 class PipelineData:
+    complaints: pd.DataFrame
     merged: pd.DataFrame
     summary: pd.DataFrame
     neighborhoods_geojson: dict[str, Any]
@@ -20,6 +21,7 @@ class PipelineData:
 def _clean_paths(project_root: Path) -> dict[str, Path]:
     clean_dir = project_root / "data" / "clean"
     return {
+        "complaints": clean_dir / "complaints_cleaned.csv",
         "merged": clean_dir / "merged_complaints_air.csv",
         "summary": clean_dir / "neighborhood_summary.csv",
         "geojson": clean_dir / "chicago_neighborhoods.geojson",
@@ -39,10 +41,16 @@ def load_pipeline_data(project_root: Path | None = None) -> PipelineData:
             + ". Run: python run_pipeline.py --skip-api"
         )
 
+    complaints = pd.read_csv(paths["complaints"], parse_dates=["date"])
     merged = pd.read_csv(paths["merged"], parse_dates=["date"])
     summary = pd.read_csv(paths["summary"])
     with paths["geojson"].open("r", encoding="utf-8") as f:
         geojson = json.load(f)
+
+    expected_complaints = {"complaint_id", "date", "latitude", "longitude", "neighborhood"}
+    missing_complaints = expected_complaints - set(complaints.columns)
+    if missing_complaints:
+        raise ValueError(f"complaints_cleaned.csv missing columns: {sorted(missing_complaints)}")
 
     expected_merged = {
         "sensor_name", "date", "pm25_mean", "no2_mean", "lat", "lon",
@@ -57,7 +65,26 @@ def load_pipeline_data(project_root: Path | None = None) -> PipelineData:
     if missing_summary:
         raise ValueError(f"neighborhood_summary.csv missing columns: {sorted(missing_summary)}")
 
-    return PipelineData(merged=merged, summary=summary, neighborhoods_geojson=geojson)
+    return PipelineData(
+        complaints=complaints,
+        merged=merged,
+        summary=summary,
+        neighborhoods_geojson=geojson,
+    )
+
+
+def filter_complaint_points(
+    complaints: pd.DataFrame,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    neighborhoods: list[str] | None = None,
+) -> pd.DataFrame:
+    """Filter complaint-level rows to mappable geocoded points."""
+    filtered = complaints[(complaints["date"] >= start_date) & (complaints["date"] <= end_date)]
+    filtered = filtered.dropna(subset=["latitude", "longitude"])
+    if neighborhoods:
+        filtered = filtered[filtered["neighborhood"].isin(neighborhoods)]
+    return filtered.copy()
 
 
 def filter_merged_data(

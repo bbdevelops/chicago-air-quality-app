@@ -19,6 +19,7 @@ try:
         compute_lag_correlations,
         compute_spike_concordance,
         enrich_neighborhood_metrics_with_estimates,
+        filter_complaint_points,
         filter_merged_data,
         load_pipeline_data,
     )
@@ -31,6 +32,7 @@ except ModuleNotFoundError:
         compute_lag_correlations,
         compute_spike_concordance,
         enrich_neighborhood_metrics_with_estimates,
+        filter_complaint_points,
         filter_merged_data,
         load_pipeline_data,
     )
@@ -104,7 +106,7 @@ def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str,
                 continue
 
             fig.add_trace(
-                go.Scattermapbox(
+                go.Scattermap(
                     lon=lons,
                     lat=lats,
                     mode="lines",
@@ -114,6 +116,167 @@ def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str,
                     name="Neighborhood boundary",
                 )
             )
+
+
+def sensor_marker_sizes(complaint_counts: pd.Series) -> np.ndarray:
+    """Translate complaint totals into marker sizes for sensor points."""
+    counts = pd.to_numeric(complaint_counts, errors="coerce").fillna(0)
+    return np.clip(((counts + 1) ** 0.8) * 1.7, 7, 18)
+
+
+def sensor_size_legend_counts(complaint_counts: pd.Series) -> list[int]:
+    """Choose visually distinct complaint bins for the marker-size legend."""
+    counts = pd.to_numeric(complaint_counts, errors="coerce").fillna(0)
+    if counts.empty:
+        return [0, 10, 40]
+
+    low = max(0, int(np.floor(float(counts.min()))))
+    high = max(low, int(np.ceil(float(counts.max()))))
+
+    if high == low:
+        return [low]
+
+    # For wide ranges, geometric spacing avoids bins like 1 / 2 / 50.
+    if high / max(low, 1) >= 6:
+        mid = int(round(np.sqrt(max(low, 2.75) * high)))
+        candidates = [low, mid, high]
+    else:
+        q35, q70 = counts.quantile([0.35, 0.70]).tolist()
+        candidates = [low, int(round(float(q35))), int(round(float(q70))), high]
+
+    ordered_candidates: list[int] = []
+    for value in candidates:
+        clean_value = max(0, int(value))
+        if clean_value not in ordered_candidates:
+            ordered_candidates.append(clean_value)
+
+    def marker_size_for_count(count: int) -> float:
+        return float(sensor_marker_sizes(pd.Series([count], dtype=float))[0])
+
+    # Keep bins only when their legend marker sizes are visibly different.
+    bins: list[int] = []
+    min_size_gap = 1.5
+    for idx, value in enumerate(ordered_candidates):
+        marker_size = marker_size_for_count(value)
+        is_last = idx == len(ordered_candidates) - 1
+        if not bins:
+            bins.append(value)
+            continue
+
+        prev_size = marker_size_for_count(bins[-1])
+        if abs(marker_size - prev_size) >= min_size_gap or is_last:
+            bins.append(value)
+
+    if bins[-1] != high:
+        bins.append(high)
+
+    unique_bins: list[int] = []
+    for value in bins:
+        if value not in unique_bins:
+            unique_bins.append(value)
+
+    if len(unique_bins) > 3:
+        mid_idx = len(unique_bins) // 2
+        unique_bins = [unique_bins[0], unique_bins[mid_idx], unique_bins[-1]]
+
+    return unique_bins
+
+
+def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
+    """Add sensor markers sized by complaint totals."""
+    if sensors.empty:
+        return
+
+    marker_sizes = sensor_marker_sizes(sensors["total_complaints"])
+    fig.add_trace(
+        go.Scattermap(
+            lat=sensors["lat"],
+            lon=sensors["lon"],
+            mode="markers",
+            marker={
+                "size": marker_sizes,
+                "color": sensors["pm25_mean"],
+                "colorscale": "Viridis",
+                "showscale": False,
+                "opacity": 0.85,
+            },
+            text=sensors["sensor_name"],
+            customdata=np.stack(
+                [
+                    sensors["neighborhood"].fillna("Unassigned"),
+                    sensors["pm25_mean"].round(2),
+                    sensors["total_complaints"].round(0).astype(int),
+                    sensors["active_days"].astype(int),
+                ],
+                axis=-1,
+            ),
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "Neighborhood: %{customdata[0]}<br>"
+                "Avg PM2.5: %{customdata[1]}<br>"
+                "Complaints: %{customdata[2]}<br>"
+                "Active days: %{customdata[3]}<extra></extra>"
+            ),
+            name="Sensors (size = complaints)",
+            showlegend=True,
+        )
+    )
+
+    for complaint_count in sensor_size_legend_counts(sensors["total_complaints"]):
+        legend_size = float(sensor_marker_sizes(pd.Series([complaint_count], dtype=float))[0])
+        fig.add_trace(
+            go.Scattermap(
+                lat=[None],
+                lon=[None],
+                mode="markers",
+                marker={
+                    "size": legend_size,
+                    "color": "rgba(255, 255, 255, 0.92)",
+                    "opacity": 0.95,
+                },
+                hoverinfo="skip",
+                name=f"{complaint_count} complaints",
+                showlegend=True,
+            )
+        )
+
+
+def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
+    """Add complaint-level geocoded points as a toggleable overlay."""
+    if complaints.empty:
+        return
+
+    complaint_dates = complaints["date"].dt.strftime("%Y-%m-%d")
+    nearest_sensor = complaints.get("nearest_sensor", pd.Series("Unknown", index=complaints.index)).fillna("Unknown")
+    fig.add_trace(
+        go.Scattermap(
+            lat=complaints["latitude"],
+            lon=complaints["longitude"],
+            mode="markers",
+            marker={
+                "size": 7,
+                "color": "rgba(20, 20, 20, 0.45)",
+                "opacity": 0.45,
+            },
+            text=complaints["complaint_id"].astype(str),
+            customdata=np.stack(
+                [
+                    complaint_dates,
+                    complaints["neighborhood"].fillna("Unassigned"),
+                    nearest_sensor,
+                ],
+                axis=-1,
+            ),
+            hovertemplate=(
+                "<b>Complaint %{text}</b><br>"
+                "Date: %{customdata[0]}<br>"
+                "Neighborhood: %{customdata[1]}<br>"
+                "Nearest sensor: %{customdata[2]}<extra></extra>"
+            ),
+            name="Complaint locations",
+            showlegend=True,
+        )
+    )
 
 
 def main() -> None:
@@ -170,6 +333,16 @@ def main() -> None:
             index=0,
             help="Choropleth keeps neighborhood fill. Heatmap shows a continuous sensor-driven surface.",
         )
+        show_sensor_markers = st.toggle(
+            "Show sensor markers",
+            value=True,
+            help="Overlay individual sensors. Marker size reflects complaint totals in the selected range.",
+        )
+        show_complaint_locations = st.toggle(
+            "Show complaint locations",
+            value=False,
+            help="Overlay geocoded complaint points for the selected date range and neighborhood filter.",
+        )
         enable_scroll_zoom = st.toggle(
             "Enable mouse-wheel zoom",
             value=True,
@@ -186,6 +359,12 @@ def main() -> None:
 
     filtered = filter_merged_data(
         merged=merged,
+        start_date=pd.Timestamp(start_date),
+        end_date=pd.Timestamp(end_date),
+        neighborhoods=selected_neighborhoods,
+    )
+    complaint_points = filter_complaint_points(
+        complaints=data.complaints,
         start_date=pd.Timestamp(start_date),
         end_date=pd.Timestamp(end_date),
         neighborhoods=selected_neighborhoods,
@@ -235,7 +414,7 @@ def main() -> None:
             )
 
             color_col = choropleth_metric_lookup[map_metric_label]
-            fig = px.choropleth_mapbox(
+            fig = px.choropleth_map(
                 map_metrics,
                 geojson=data.neighborhoods_geojson,
                 locations="neighborhood",
@@ -259,46 +438,11 @@ def main() -> None:
                     "estimated_nearest_km": ":.2f",
                 },
                 color_continuous_scale="YlOrRd",
-                mapbox_style="carto-positron",
+                map_style="carto-positron",
                 center={"lat": 41.8781, "lon": -87.6298},
                 zoom=9,
                 opacity=0.58,
             )
-
-            if not sensors.empty:
-                marker_sizes = np.clip(np.sqrt(sensors["total_complaints"].fillna(0) + 1) * 2.2, 6, 18)
-                fig.add_trace(
-                    go.Scattermapbox(
-                        lat=sensors["lat"],
-                        lon=sensors["lon"],
-                        mode="markers",
-                        marker={
-                            "size": marker_sizes,
-                            "color": sensors["pm25_mean"],
-                            "colorscale": "Viridis",
-                            "showscale": False,
-                            "opacity": 0.85,
-                        },
-                        text=sensors["sensor_name"],
-                        customdata=np.stack(
-                            [
-                                sensors["neighborhood"].fillna("Unassigned"),
-                                sensors["pm25_mean"].round(2),
-                                sensors["total_complaints"].astype(int),
-                                sensors["active_days"].astype(int),
-                            ],
-                            axis=-1,
-                        ),
-                        hovertemplate=(
-                            "<b>%{text}</b><br>"
-                            "Neighborhood: %{customdata[0]}<br>"
-                            "Avg PM2.5: %{customdata[1]}<br>"
-                            "Complaints: %{customdata[2]}<br>"
-                            "Active days: %{customdata[3]}<extra></extra>"
-                        ),
-                        name="Sensors",
-                    )
-                )
         else:
             heat_col = heatmap_metric_lookup[map_metric_label]
             heat_points = sensors.dropna(subset=["lat", "lon", heat_col]).copy()
@@ -307,14 +451,14 @@ def main() -> None:
                 st.warning("No sensor rows available in the selected filter range for the heatmap.")
                 fig = go.Figure()
                 fig.update_layout(
-                    mapbox={
+                    map={
                         "style": "carto-positron",
                         "center": {"lat": 41.8781, "lon": -87.6298},
                         "zoom": 9,
                     }
                 )
             else:
-                fig = px.density_mapbox(
+                fig = px.density_map(
                     heat_points,
                     lat="lat",
                     lon="lon",
@@ -329,7 +473,7 @@ def main() -> None:
                         "active_days": True,
                     },
                     color_continuous_scale="YlOrRd",
-                    mapbox_style="carto-positron",
+                    map_style="carto-positron",
                     center={"lat": 41.8781, "lon": -87.6298},
                     zoom=9,
                     title="Continuous sensor density heatmap",
@@ -337,10 +481,27 @@ def main() -> None:
 
             add_neighborhood_boundaries(fig, data.neighborhoods_geojson)
 
+        if show_sensor_markers:
+            add_sensor_markers(fig, sensors)
+
+        if show_complaint_locations:
+            add_complaint_locations(fig, complaint_points)
+
         fig.update_layout(
             margin={"l": 0, "r": 0, "t": 10, "b": 0},
             height=map_height_px,
             uirevision="map-view",
+            legend={
+                "title": {"text": "Map layers and marker size", "font": {"color": "#F8FAFC", "size": 14}},
+                "font": {"color": "#F8FAFC", "size": 12},
+                "yanchor": "top",
+                "y": 0.99,
+                "xanchor": "right",
+                "x": 0.99,
+                "bgcolor": "rgba(15, 23, 42, 0.92)",
+                "bordercolor": "rgba(248, 250, 252, 0.35)",
+                "borderwidth": 1,
+            },
         )
         st.plotly_chart(
             fig,
@@ -348,7 +509,6 @@ def main() -> None:
             config={
                 "scrollZoom": enable_scroll_zoom,
                 "displaylogo": False,
-                "modeBarButtonsToAdd": ["resetViewMapbox"],
             },
         )
 
