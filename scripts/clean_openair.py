@@ -3,7 +3,7 @@ clean_openair.py
 ----------------
 Clean the raw Open Air Chicago Day Aggregations:
   - Convert timestamps from UTC → America/Chicago
-  - Drop null PM2.5 days
+    - Drop rows where both PM2.5 and NO2 are missing
   - Rename to clean snake_case columns
   - Flag outliers
 
@@ -77,10 +77,18 @@ def main() -> None:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    # ---- Drop rows with null PM2.5 -----------------------------------------
+    # ---- Drop rows only when all pollutant values are missing --------------
     before = len(df)
-    df = df.dropna(subset=[pm25_col])
-    log.info("Dropped %d rows with null PM2.5 (%d remaining).", before - len(df), len(df))
+    pollutant_cols = [pm25_col]
+    if no2_col:
+        pollutant_cols.append(no2_col)
+
+    df = df.dropna(subset=pollutant_cols, how="all")
+    log.info(
+        "Dropped %d rows with both PM2.5 and NO2 missing (%d remaining).",
+        before - len(df),
+        len(df),
+    )
 
     # ---- Flag outliers (keep them — just add flag) --------------------------
     df["pm25_outlier"] = (df[pm25_col] > PM25_OUTLIER_UPPER) | (df[pm25_col] < PM25_OUTLIER_LOWER)

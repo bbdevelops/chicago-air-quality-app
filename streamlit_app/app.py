@@ -52,6 +52,14 @@ def cached_load_data(project_root: str):
     return load_pipeline_data(Path(project_root))
 
 
+def format_delta(current: float | int, previous: float | int, decimals: int = 2) -> str | None:
+    """Format KPI deltas as signed strings for Streamlit metric cards."""
+    if pd.isna(previous):
+        return None
+    change = float(current) - float(previous)
+    return f"{change:+.{decimals}f} vs prior period"
+
+
 def normalize_date_range(selection: object, fallback_start: date, fallback_end: date) -> tuple[date, date]:
     """Normalize Streamlit date_input return value to a guaranteed (start, end) tuple."""
     if isinstance(selection, tuple):
@@ -196,7 +204,7 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
             marker={
                 "size": marker_sizes,
                 "color": sensors["pm25_mean"],
-                "colorscale": "Viridis",
+                "colorscale": "deep",
                 "showscale": False,
                 "opacity": 0.85,
             },
@@ -231,7 +239,7 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
                 mode="markers",
                 marker={
                     "size": legend_size,
-                    "color": "rgba(255, 255, 255, 0.92)",
+                    "color": "rgba(38, 129, 142, 0.92)",
                     "opacity": 0.95,
                 },
                 hoverinfo="skip",
@@ -255,8 +263,8 @@ def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
             mode="markers",
             marker={
                 "size": 7,
-                "color": "rgba(20, 20, 20, 0.45)",
-                "opacity": 0.45,
+                "color": "rgb(38, 129, 142)",
+                "opacity": 0.95,
             },
             text=complaints["complaint_id"].astype(str),
             customdata=np.stack(
@@ -282,8 +290,7 @@ def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
 def main() -> None:
     st.title("Chicago Air Quality Explorer")
     st.caption(
-        "Streamlit dashboard powered by the existing ETL pipeline outputs in data/clean/. "
-        "Run python run_pipeline.py --skip-api before refreshing."
+        "Track neighborhood air quality and 311 complaint trends across Chicago using city sensor data."
     )
 
     try:
@@ -326,6 +333,29 @@ def main() -> None:
             ],
         )
 
+        st.subheader("Temporal trends")
+        trend_metric_label = st.selectbox(
+            "Primary trend metric",
+            options=["PM2.5", "NO2"],
+            help="Choose which pollutant drives trend and ranking charts.",
+        )
+        trend_chart_style = st.radio(
+            "Trend chart style",
+            options=["Line + complaints", "Area + complaints"],
+            index=0,
+            horizontal=True,
+        )
+        calendar_metric_label = st.selectbox(
+            "Calendar heatmap metric",
+            options=["PM2.5", "NO2", "Complaints"],
+        )
+
+        show_quick_tour = st.toggle(
+            "Show quick tour",
+            value=True,
+            help="Display a short walkthrough for first-time visitors.",
+        )
+
         st.subheader("Map options")
         map_mode = st.radio(
             "Map mode",
@@ -357,6 +387,40 @@ def main() -> None:
             help="Increase this if the map feels too tight vertically.",
         )
 
+        st.caption("Color scale layout")
+        compact_color_scale = st.toggle(
+            "Compact color scale (mobile)",
+            value=True,
+            help="Use a slimmer color scale that takes less horizontal space on phones.",
+        )
+        default_scale_width = 14 if compact_color_scale else 24
+        default_scale_height_pct = 58 if compact_color_scale else 76
+        default_scale_x = 0.985 if compact_color_scale else 1.0
+
+        color_scale_width_px = st.slider(
+            "Color scale width (px)",
+            min_value=8,
+            max_value=56,
+            value=default_scale_width,
+            step=1,
+        )
+        color_scale_height_pct = st.slider(
+            "Color scale height (%)",
+            min_value=35,
+            max_value=95,
+            value=default_scale_height_pct,
+            step=1,
+        )
+        color_scale_x = st.slider(
+            "Color scale horizontal position",
+            min_value=0.90,
+            max_value=1.04,
+            value=default_scale_x,
+            step=0.005,
+            format="%.3f",
+            help="Lower moves it left into the plot, higher pushes it farther right.",
+        )
+
     filtered = filter_merged_data(
         merged=merged,
         start_date=pd.Timestamp(start_date),
@@ -371,7 +435,22 @@ def main() -> None:
     )
 
     base_map_metrics = build_neighborhood_metrics(summary, filtered)
+    if selected_neighborhoods:
+        base_map_metrics = base_map_metrics[
+            base_map_metrics["neighborhood"].isin(selected_neighborhoods)
+        ].copy()
+
     city_daily = build_city_daily_metrics(filtered)
+    if not city_daily.empty:
+        full_dates = pd.date_range(start=pd.Timestamp(start_date), end=pd.Timestamp(end_date), freq="D")
+        city_daily = (
+            city_daily.set_index("date")
+            .reindex(full_dates)
+            .rename_axis("date")
+            .reset_index()
+        )
+        city_daily["complaint_count"] = city_daily["complaint_count"].fillna(0)
+        city_daily["spike_sensor_days"] = city_daily["spike_sensor_days"].fillna(0)
     sensors = build_sensor_snapshot(filtered)
     map_metrics = enrich_neighborhood_metrics_with_estimates(
         neighborhood_metrics=base_map_metrics,
@@ -382,17 +461,101 @@ def main() -> None:
         max_distance_km=15.0,
     )
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Rows in selection", f"{len(filtered):,}")
-    col2.metric("Avg PM2.5", f"{filtered['pm25_mean'].mean():.2f}" if not filtered.empty else "n/a")
-    col3.metric("Total complaints", f"{int(filtered['complaint_count'].sum()):,}" if not filtered.empty else "0")
-    col4.metric("Active sensors", f"{filtered['sensor_name'].nunique():,}" if not filtered.empty else "0")
+    if show_quick_tour:
+        with st.expander("Quick tour: how to use this dashboard", expanded=False):
+            st.markdown(
+                """
+                1. Set your date range and optionally focus on specific neighborhoods.
+                2. Start in Neighborhood Map to compare air conditions and complaint activity.
+                3. Use Temporal Trends to explore citywide day-to-day patterns and calendar seasonality.
+                4. Visit Neighborhood Trends for ranked neighborhood comparisons.
+                5. Check Lead-Lag & Spikes to explore whether complaint activity follows pollution spikes.
+                6. Open Coverage QA for transparency on direct sensor coverage vs estimated neighborhoods.
+                """
+            )
 
-    tab_map, tab_trends, tab_lag, tab_quality = st.tabs(
-        ["Neighborhood Map", "Temporal Trends", "Lead-Lag & Spikes", "Coverage QA"]
+    selected_days = int((pd.Timestamp(end_date) - pd.Timestamp(start_date)).days) + 1
+    prev_end = pd.Timestamp(start_date) - pd.Timedelta(days=1)
+    prev_start = prev_end - pd.Timedelta(days=max(selected_days - 1, 0))
+    previous_filtered = filter_merged_data(
+        merged=merged,
+        start_date=prev_start,
+        end_date=prev_end,
+        neighborhoods=selected_neighborhoods,
+    )
+
+    current_pm25 = float(filtered["pm25_mean"].mean()) if not filtered.empty else float("nan")
+    previous_pm25 = float(previous_filtered["pm25_mean"].mean()) if not previous_filtered.empty else float("nan")
+
+    current_no2 = float(filtered["no2_mean"].mean()) if not filtered.empty else float("nan")
+    previous_no2 = float(previous_filtered["no2_mean"].mean()) if not previous_filtered.empty else float("nan")
+
+    current_complaints = int(filtered["complaint_count"].sum()) if not filtered.empty else 0
+    previous_complaints = int(previous_filtered["complaint_count"].sum()) if not previous_filtered.empty else 0
+
+    current_sensors = int(filtered["sensor_name"].nunique()) if not filtered.empty else 0
+    previous_sensors = int(previous_filtered["sensor_name"].nunique()) if not previous_filtered.empty else 0
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric(
+        "Average PM2.5 (ug/m3)",
+        f"{current_pm25:.2f}" if not np.isnan(current_pm25) else "n/a",
+        delta=format_delta(current_pm25, previous_pm25, decimals=2),
+    )
+    col2.metric(
+        "Average NO2 (ppb)",
+        f"{current_no2:.2f}" if not np.isnan(current_no2) else "n/a",
+        delta=format_delta(current_no2, previous_no2, decimals=2),
+    )
+    col3.metric(
+        "Total 311 air complaints",
+        f"{current_complaints:,}",
+        delta=f"{current_complaints - previous_complaints:+,} vs prior period",
+    )
+    col4.metric(
+        "Active sensors",
+        f"{current_sensors:,}",
+        delta=f"{current_sensors - previous_sensors:+,} vs prior period",
+    )
+
+    st.caption(
+        f"Selection window: {start_date:%b %d, %Y} to {end_date:%b %d, %Y} ({selected_days} days)."
+    )
+
+    tab_map, tab_trends, tab_neighborhood, tab_lag, tab_quality = st.tabs(
+        ["Neighborhood Map", "Temporal Trends", "Neighborhood Trends", "Lead-Lag & Spikes", "Coverage QA"]
     )
 
     with tab_map:
+        map_label_lookup = {
+            "neighborhood": "Neighborhood",
+            "neighborhood_secondary": "Neighborhood alias",
+            "coverage_source": "Coverage source",
+            "sensor_count": "Sensors in neighborhood",
+            "pm25_map_value": "PM2.5 average (ug/m3)",
+            "pm25_mean_period": "PM2.5 direct value (ug/m3)",
+            "pm25_mean_estimated": "PM2.5 IDW estimate (ug/m3)",
+            "no2_map_value": "NO2 average (ppb)",
+            "no2_mean_period": "NO2 direct value (ppb)",
+            "no2_mean_estimated": "NO2 IDW estimate (ppb)",
+            "complaints_map_value": "Complaints (period)",
+            "complaints_period": "Complaints direct value",
+            "complaints_estimated": "Complaints IDW estimate",
+            "estimated_sensor_count": "Sensors used for estimate",
+            "estimated_nearest_km": "Nearest sensor distance (km)",
+            "pm25_mean": "PM2.5 average (ug/m3)",
+            "no2_mean": "NO2 average (ppb)",
+            "total_complaints": "Complaints (period)",
+            "active_days": "Active sensor days",
+        }
+
+        colorbar_title_lookup = {
+            "PM2.5 mean (selected period)": "PM2.5 Avg.",
+            "NO2 mean (selected period)": "NO2 Avg.",
+            "Complaints (selected period)": "Complaints",
+            "Sensor coverage (all-time)": "Sensors",
+        }
+
         choropleth_metric_lookup = {
             "PM2.5 mean (selected period)": "pm25_map_value",
             "NO2 mean (selected period)": "no2_map_value",
@@ -437,6 +600,7 @@ def main() -> None:
                     "estimated_sensor_count": True,
                     "estimated_nearest_km": ":.2f",
                 },
+                labels=map_label_lookup,
                 color_continuous_scale="YlOrRd",
                 map_style="carto-positron",
                 center={"lat": 41.8781, "lon": -87.6298},
@@ -472,6 +636,7 @@ def main() -> None:
                         "total_complaints": True,
                         "active_days": True,
                     },
+                    labels=map_label_lookup,
                     color_continuous_scale="YlOrRd",
                     map_style="carto-positron",
                     center={"lat": 41.8781, "lon": -87.6298},
@@ -487,18 +652,36 @@ def main() -> None:
         if show_complaint_locations:
             add_complaint_locations(fig, complaint_points)
 
+        fig.update_coloraxes(
+            colorbar_title=colorbar_title_lookup[map_metric_label],
+            colorbar_thicknessmode="pixels",
+            colorbar_thickness=color_scale_width_px,
+            colorbar_len=color_scale_height_pct / 100.0,
+            colorbar_x=color_scale_x,
+            colorbar_xanchor="right",
+            colorbar_y=0.5,
+            colorbar_yanchor="middle",
+            colorbar_tickfont={"size": 10 if compact_color_scale else 12, "color": "#0F172A"},
+            colorbar_title_font={"size": 11 if compact_color_scale else 13, "color": "#0F172A"},
+            colorbar_bgcolor="rgba(255, 255, 255, 0.86)",
+            colorbar_bordercolor="rgba(15, 23, 42, 0.35)",
+            colorbar_borderwidth=.11,
+            colorbar_outlinewidth=1,
+            colorbar_outlinecolor="rgba(15, 23, 42, 0.5)",
+        )
+
         fig.update_layout(
             margin={"l": 0, "r": 0, "t": 10, "b": 0},
             height=map_height_px,
             uirevision="map-view",
             legend={
-                "title": {"text": "Map layers and marker size", "font": {"color": "#F8FAFC", "size": 14}},
-                "font": {"color": "#F8FAFC", "size": 12},
+                "title": {"text": "Map layers and marker size", "font": {"color": "#0F172A", "size": 14}},
+                "font": { "color": "#0F172A", "size": 12},
                 "yanchor": "top",
                 "y": 0.99,
                 "xanchor": "right",
                 "x": 0.99,
-                "bgcolor": "rgba(15, 23, 42, 0.92)",
+                "bgcolor": "rgba(255, 255, 255, 0.86)",
                 "bordercolor": "rgba(248, 250, 252, 0.35)",
                 "borderwidth": 1,
             },
@@ -516,14 +699,24 @@ def main() -> None:
         if city_daily.empty:
             st.warning("No rows in selected range.")
         else:
+            trend_value_col = "pm25_mean" if trend_metric_label == "PM2.5" else "no2_mean"
+            trend_value_title = "PM2.5 (ug/m3)" if trend_metric_label == "PM2.5" else "NO2 (ppb)"
+            missing_days = int(city_daily[trend_value_col].isna().sum())
+            if missing_days > 0:
+                st.caption(
+                    f"Note: {missing_days} day(s) in this window have no {trend_metric_label} readings from source sensors. "
+                    "Visible breaks in the pollutant line reflect collection gaps, not dashboard errors."
+                )
+
             trend = make_subplots(specs=[[{"secondary_y": True}]])
             trend.add_trace(
                 go.Scatter(
                     x=city_daily["date"],
-                    y=city_daily["pm25_mean"],
-                    mode="lines",
-                    name="Citywide PM2.5 mean",
+                    y=city_daily[trend_value_col],
+                    mode="lines" if trend_chart_style == "Line + complaints" else "lines+markers",
+                    name=f"Citywide {trend_metric_label} average",
                     line={"width": 2},
+                    fill="tozeroy" if trend_chart_style == "Area + complaints" else None,
                 ),
                 secondary_y=False,
             )
@@ -537,31 +730,92 @@ def main() -> None:
                 secondary_y=True,
             )
             trend.update_layout(
-                title="PM2.5 vs 311 complaints over time",
-                margin={"l": 0, "r": 0, "t": 45, "b": 0},
+                title=f"{trend_metric_label} vs 311 Complaints Over Time",
+                margin={"l": 0, "r": 0, "t": 45, "b": 45},
                 legend={"orientation": "h", "y": 1.08},
             )
-            trend.update_yaxes(title_text="PM2.5 (ug/m3)", secondary_y=False)
+            trend.update_yaxes(title_text=trend_value_title, secondary_y=False)
             trend.update_yaxes(title_text="Complaint count", secondary_y=True)
             st.plotly_chart(trend, use_container_width=True)
 
-            rank = (
-                map_metrics.dropna(subset=["pm25_mean_period"])
-                .sort_values("pm25_mean_period", ascending=False)
-                .head(15)
+            calendar_value_lookup = {
+                "PM2.5": ("pm25_mean", "PM2.5 Avg."),
+                "NO2": ("no2_mean", "NO2 Avg."),
+                "Complaints": ("complaint_count", "Complaint count"),
+            }
+            calendar_value_col, calendar_title = calendar_value_lookup[calendar_metric_label]
+            monthly_options = sorted(city_daily["date"].dt.to_period("M").astype(str).unique().tolist())
+            default_month_idx = max(len(monthly_options) - 1, 0)
+            selected_month = st.selectbox(
+                "Calendar month",
+                options=monthly_options,
+                index=default_month_idx,
+                help="Calendar-like grid with days grouped by week and weekday.",
             )
-            if not rank.empty:
-                rank_fig = px.bar(
-                    rank,
-                    x="pm25_mean_period",
-                    y="neighborhood",
-                    orientation="h",
-                    color="pm25_mean_period",
-                    color_continuous_scale="YlOrRd",
-                    title="Top 15 neighborhoods by PM2.5 in selected period",
+
+            calendar_source = city_daily[city_daily["date"].dt.to_period("M").astype(str) == selected_month].copy()
+            if calendar_source.empty:
+                st.info("No rows available for the selected calendar month.")
+            else:
+                calendar_source["week_start"] = calendar_source["date"] - pd.to_timedelta(calendar_source["date"].dt.weekday, unit="D")
+                calendar_source["weekday"] = pd.Categorical(
+                    calendar_source["date"].dt.day_name().str.slice(0, 3),
+                    categories=["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                    ordered=True,
                 )
-                rank_fig.update_layout(yaxis={"categoryorder": "total ascending"}, margin={"l": 0, "r": 0, "t": 45, "b": 0})
-                st.plotly_chart(rank_fig, use_container_width=True)
+
+                calendar_pivot = (
+                    calendar_source.pivot_table(
+                        index="week_start",
+                        columns="weekday",
+                        values=calendar_value_col,
+                        aggfunc="mean",
+                    )
+                    .sort_index()
+                )
+
+                if not calendar_pivot.empty:
+                    calendar_fig = px.imshow(
+                        calendar_pivot,
+                        aspect="auto",
+                        color_continuous_scale="YlOrRd",
+                        labels={
+                            "x": "Day of week",
+                            "y": "Week starting",
+                            "color": calendar_title,
+                        },
+                        title=f"{calendar_metric_label} calendar heatmap ({selected_month})",
+                    )
+                    calendar_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+                    st.plotly_chart(calendar_fig, use_container_width=True)
+
+    with tab_neighborhood:
+        ranking_value_col = "pm25_mean_period" if trend_metric_label == "PM2.5" else "no2_mean_period"
+        ranking_value_title = "PM2.5 average (selected period)" if trend_metric_label == "PM2.5" else "NO2 average (selected period)"
+
+        rank = (
+            map_metrics.dropna(subset=[ranking_value_col])
+            .sort_values(ranking_value_col, ascending=False)
+            .head(15)
+        )
+        if rank.empty:
+            st.warning("No neighborhood trend rows available for the current filters.")
+        else:
+            rank_fig = px.bar(
+                rank,
+                x=ranking_value_col,
+                y="neighborhood",
+                orientation="h",
+                color=ranking_value_col,
+                color_continuous_scale="YlOrRd",
+                title=f"Top 15 neighborhoods by {trend_metric_label} in selected period",
+                labels={
+                    "neighborhood": "Neighborhood",
+                    ranking_value_col: ranking_value_title,
+                },
+            )
+            rank_fig.update_layout(yaxis={"categoryorder": "total ascending"}, margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            st.plotly_chart(rank_fig, use_container_width=True)
 
     with tab_lag:
         lag_df = compute_lag_correlations(city_daily, max_lag=7)
@@ -605,6 +859,31 @@ def main() -> None:
             st.plotly_chart(spike_fig, use_container_width=True)
 
     with tab_quality:
+        quality_columns = [
+            "neighborhood",
+            "neighborhood_secondary",
+            "sensor_count",
+            "coverage_source",
+            "pm25_map_value",
+            "no2_map_value",
+            "complaints_period",
+            "complaints_map_value",
+            "estimated_sensor_count",
+            "estimated_nearest_km",
+        ]
+        quality_label_lookup = {
+            "neighborhood": "Neighborhood",
+            "neighborhood_secondary": "Neighborhood alias",
+            "sensor_count": "Sensors in neighborhood",
+            "coverage_source": "Coverage source",
+            "pm25_map_value": "PM2.5 average (ug/m3)",
+            "no2_map_value": "NO2 average (ppb)",
+            "complaints_period": "Complaints direct value",
+            "complaints_map_value": "Complaints (period)",
+            "estimated_sensor_count": "Sensors used for estimate",
+            "estimated_nearest_km": "Nearest sensor distance (km)",
+        }
+
         no_coverage = map_metrics[map_metrics["sensor_count"].fillna(0) == 0].copy()
         st.subheader("Neighborhoods without sensor coverage")
         st.caption(
@@ -612,25 +891,14 @@ def main() -> None:
             "currently uses direct period values, IDW estimates, or remains unavailable."
         )
         st.dataframe(
-            no_coverage[[
-                "neighborhood",
-                "neighborhood_secondary",
-                "sensor_count",
-                "coverage_source",
-                "pm25_map_value",
-                "no2_map_value",
-                "complaints_period",
-                "complaints_map_value",
-                "estimated_sensor_count",
-                "estimated_nearest_km",
-            ]].sort_values("neighborhood"),
+            no_coverage[quality_columns].rename(columns=quality_label_lookup).sort_values("Neighborhood"),
             use_container_width=True,
             hide_index=True,
         )
 
         st.subheader("Filtered neighborhood metrics")
         st.dataframe(
-            map_metrics.sort_values("neighborhood"),
+            map_metrics.rename(columns=quality_label_lookup).sort_values("Neighborhood"),
             use_container_width=True,
             hide_index=True,
         )
