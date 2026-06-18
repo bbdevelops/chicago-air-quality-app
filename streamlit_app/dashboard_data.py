@@ -407,15 +407,26 @@ def compute_lag_correlations(city_daily: pd.DataFrame, max_lag: int = 7) -> pd.D
 
 def compute_spike_concordance(
     city_daily: pd.DataFrame,
-    threshold: float = 35.0,
+    spike_percentile: float = 0.80,
     window_days: int = 2,
 ) -> tuple[pd.DataFrame, float]:
-    """Summarize complaint activity around city-level PM2.5 spike days."""
+    """Summarize complaint activity around city-level PM2.5 spike days.
+
+    A spike day is any day where city-wide average PM2.5 is at or above the
+    ``spike_percentile`` quantile of the selected date range.  Using a
+    percentile (rather than a fixed threshold) guarantees spike days are always
+    present regardless of the absolute pollution level in the selected window.
+    """
     if city_daily.empty:
         return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
 
     city = city_daily.sort_values("date").copy()
-    city["is_spike"] = city["pm25_mean"] > threshold
+    pm25_valid = city["pm25_mean"].dropna()
+    if pm25_valid.empty:
+        return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
+
+    threshold = float(pm25_valid.quantile(spike_percentile))
+    city["is_spike"] = city["pm25_mean"] >= threshold
 
     spike_dates = city.loc[city["is_spike"], "date"]
     baseline = city.loc[~city["is_spike"], "complaint_count"].mean()

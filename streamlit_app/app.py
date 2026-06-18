@@ -118,7 +118,7 @@ def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str,
                     lon=lons,
                     lat=lats,
                     mode="lines",
-                    line={"color": "rgba(20, 20, 20, 0.35)", "width": 1},
+                    line={"color": "rgba(0, 255, 65, 0.25)", "width": 1},
                     hoverinfo="skip",
                     showlegend=False,
                     name="Neighborhood boundary",
@@ -129,7 +129,7 @@ def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str,
 def sensor_marker_sizes(complaint_counts: pd.Series) -> np.ndarray:
     """Translate complaint totals into marker sizes for sensor points."""
     counts = pd.to_numeric(complaint_counts, errors="coerce").fillna(0)
-    return np.clip(((counts + 1) ** 0.8) * 1.7, 7, 18)
+    return np.clip(((counts + 1) ** 0.65) * 1.6, 6, 18)
 
 
 def sensor_size_legend_counts(complaint_counts: pd.Series) -> list[int]:
@@ -163,7 +163,7 @@ def sensor_size_legend_counts(complaint_counts: pd.Series) -> list[int]:
 
     # Keep bins only when their legend marker sizes are visibly different.
     bins: list[int] = []
-    min_size_gap = 1.5
+    min_size_gap = 2.5
     for idx, value in enumerate(ordered_candidates):
         marker_size = marker_size_for_count(value)
         is_last = idx == len(ordered_candidates) - 1
@@ -190,10 +190,14 @@ def sensor_size_legend_counts(complaint_counts: pd.Series) -> list[int]:
     return unique_bins
 
 
-def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
-    """Add sensor markers sized by complaint totals."""
+def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> list[tuple[int, float]]:
+    """Add sensor markers sized by complaint totals.
+
+    Returns a list of (complaint_count, pixel_size) tuples so the caller can
+    render a mobile-friendly caption below the map.
+    """
     if sensors.empty:
-        return
+        return []
 
     marker_sizes = sensor_marker_sizes(sensors["total_complaints"])
     fig.add_trace(
@@ -204,7 +208,8 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
             marker={
                 "size": marker_sizes,
                 "color": sensors["pm25_mean"],
-                "colorscale": "deep",
+                # Color scheme for sensor markers
+                "colorscale": [[0, "#003300"], [0.25, "#00aa33"], [0.5, "#00ff41"], [0.75, "#aaff44"], [1, "#ffffff"]],
                 "showscale": False,
                 "opacity": 0.85,
             },
@@ -213,6 +218,7 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
                 [
                     sensors["neighborhood"].fillna("Unassigned"),
                     sensors["pm25_mean"].round(2),
+                    sensors["no2_mean"].round(2),
                     sensors["total_complaints"].round(0).astype(int),
                     sensors["active_days"].astype(int),
                 ],
@@ -221,32 +227,36 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> None:
             hovertemplate=(
                 "<b>%{text}</b><br>"
                 "Neighborhood: %{customdata[0]}<br>"
-                "Avg PM2.5: %{customdata[1]}<br>"
-                "Complaints: %{customdata[2]}<br>"
-                "Active days: %{customdata[3]}<extra></extra>"
+                "Avg PM2.5: %{customdata[1]} ug/m³<br>"
+                "Avg NO2: %{customdata[2]} ppb<br>"
+                "Complaints: %{customdata[3]}<br>"
+                "Active days: %{customdata[4]}<extra></extra>"
             ),
             name="Sensors (size = complaints)",
             showlegend=True,
         )
     )
 
-    for complaint_count in sensor_size_legend_counts(sensors["total_complaints"]):
-        legend_size = float(sensor_marker_sizes(pd.Series([complaint_count], dtype=float))[0])
+    # Phantom traces drive the desktop marker-size legend inside the Plotly panel.
+    # On mobile the Plotly legend is hidden via CSS; the HTML caption below takes over.
+    bins = sensor_size_legend_counts(sensors["total_complaints"])
+    bin_data = [
+        (count, float(sensor_marker_sizes(pd.Series([count], dtype=float))[0]))
+        for count in bins
+    ]
+    for count, legend_size in bin_data:
         fig.add_trace(
             go.Scattermap(
                 lat=[None],
                 lon=[None],
                 mode="markers",
-                marker={
-                    "size": legend_size,
-                    "color": "rgba(38, 129, 142, 0.92)",
-                    "opacity": 0.95,
-                },
+                marker={"size": legend_size, "color": "#00ff41", "opacity": 0.85},
                 hoverinfo="skip",
-                name=f"{complaint_count} complaints",
+                name=f"{count} complaints",
                 showlegend=True,
             )
         )
+    return bin_data
 
 
 def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
@@ -263,7 +273,7 @@ def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
             mode="markers",
             marker={
                 "size": 7,
-                "color": "rgb(38, 129, 142)",
+                "color": "#00ff41",
                 "opacity": 0.95,
             },
             text=complaints["complaint_id"].astype(str),
@@ -349,6 +359,14 @@ def main() -> None:
             "Calendar heatmap metric",
             options=["PM2.5", "NO2", "Complaints"],
         )
+        spike_percentile_pct = st.slider(
+            "Spike threshold (percentile)",
+            min_value=60,
+            max_value=95,
+            value=80,
+            step=5,
+            help="Days with PM2.5 above this percentile of the selected period are treated as spike days in the Lead-Lag & Spikes tab.",
+        )
 
         show_quick_tour = st.toggle(
             "Show quick tour",
@@ -373,11 +391,7 @@ def main() -> None:
             value=False,
             help="Overlay geocoded complaint points for the selected date range and neighborhood filter.",
         )
-        enable_scroll_zoom = st.toggle(
-            "Enable mouse-wheel zoom",
-            value=True,
-            help="Use the middle mouse wheel to zoom in/out on the map.",
-        )
+        # Mouse-wheel zoom is always enabled.
         map_height_px = st.slider(
             "Map height (px)",
             min_value=500,
@@ -388,37 +402,29 @@ def main() -> None:
         )
 
         st.caption("Color scale layout")
-        compact_color_scale = st.toggle(
-            "Compact color scale (mobile)",
-            value=True,
-            help="Use a slimmer color scale that takes less horizontal space on phones.",
-        )
-        default_scale_width = 14 if compact_color_scale else 24
-        default_scale_height_pct = 58 if compact_color_scale else 76
-        default_scale_x = 0.985 if compact_color_scale else 1.0
-
+        # Compact color scale is always on; sliders let desktop users fine-tune.
         color_scale_width_px = st.slider(
-            "Color scale width (px)",
+            "Color scale thickness (px)",
             min_value=8,
             max_value=56,
-            value=default_scale_width,
+            value=14,
             step=1,
         )
         color_scale_height_pct = st.slider(
-            "Color scale height (%)",
-            min_value=35,
+            "Color scale length (%)",
+            min_value=20,
             max_value=95,
-            value=default_scale_height_pct,
+            value=58,
             step=1,
         )
         color_scale_x = st.slider(
-            "Color scale horizontal position",
-            min_value=0.90,
-            max_value=1.04,
-            value=default_scale_x,
-            step=0.005,
-            format="%.3f",
-            help="Lower moves it left into the plot, higher pushes it farther right.",
+            "Color scale horizontal offset",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.99,
+            step=0.01,
+            format="%.2f",
+            help="Shifts the colorbar left or right along the bottom of the map.",
         )
 
     filtered = filter_merged_data(
@@ -601,8 +607,9 @@ def main() -> None:
                     "estimated_nearest_km": ":.2f",
                 },
                 labels=map_label_lookup,
-                color_continuous_scale="YlOrRd",
-                map_style="carto-positron",
+                # Color scheme for neighborhood map, neighborhood polygons
+                color_continuous_scale=[[0, "#001a00"], [0.25, "#005500"], [0.5, "#00aa33"], [0.75, "#00ff41"], [1, "#aaffaa"]],
+                map_style="carto-darkmatter",
                 center={"lat": 41.8781, "lon": -87.6298},
                 zoom=9,
                 opacity=0.58,
@@ -637,8 +644,9 @@ def main() -> None:
                         "active_days": True,
                     },
                     labels=map_label_lookup,
-                    color_continuous_scale="YlOrRd",
-                    map_style="carto-positron",
+                    #Color scheme for neighborhood map, "continuous heatmap" mode
+                    color_continuous_scale=[[0, "#000000"], [0.25, "#003300"], [0.5, "#00aa33"], [0.75, "#00ff41"], [1, "#ccffcc"]],
+                    map_style="carto-darkmatter",
                     center={"lat": 41.8781, "lon": -87.6298},
                     zoom=9,
                     title="Continuous sensor density heatmap",
@@ -646,12 +654,15 @@ def main() -> None:
 
             add_neighborhood_boundaries(fig, data.neighborhoods_geojson)
 
+        size_legend_bins: list[tuple[int, float]] = []
         if show_sensor_markers:
-            add_sensor_markers(fig, sensors)
+            size_legend_bins = add_sensor_markers(fig, sensors)
 
         if show_complaint_locations:
             add_complaint_locations(fig, complaint_points)
 
+        # Colorbar: vertical floating overlay on the right side (desktop).
+        # On mobile the Plotly colorbar is hidden via CSS; a custom HTML bar shows below.
         fig.update_coloraxes(
             colorbar_title=colorbar_title_lookup[map_metric_label],
             colorbar_thicknessmode="pixels",
@@ -661,28 +672,29 @@ def main() -> None:
             colorbar_xanchor="right",
             colorbar_y=0.5,
             colorbar_yanchor="middle",
-            colorbar_tickfont={"size": 10 if compact_color_scale else 12, "color": "#0F172A"},
-            colorbar_title_font={"size": 11 if compact_color_scale else 13, "color": "#0F172A"},
-            colorbar_bgcolor="rgba(255, 255, 255, 0.86)",
-            colorbar_bordercolor="rgba(15, 23, 42, 0.35)",
+            colorbar_tickfont={"size": 10, "color": "#00ff41"},
+            colorbar_title_font={"size": 11, "color": "#00ff41"},
+            colorbar_bgcolor="rgba(10, 10, 10, 0.88)",
+            colorbar_bordercolor="rgba(0, 255, 65, 0.35)",
             colorbar_borderwidth=.11,
             colorbar_outlinewidth=1,
-            colorbar_outlinecolor="rgba(15, 23, 42, 0.5)",
+            colorbar_outlinecolor="rgba(0, 255, 65, 0.5)",
         )
 
         fig.update_layout(
             margin={"l": 0, "r": 0, "t": 10, "b": 0},
             height=map_height_px,
             uirevision="map-view",
+            # Legend only shows toggleable layer names (sensor markers, complaints).
             legend={
-                "title": {"text": "Map layers and marker size", "font": {"color": "#0F172A", "size": 14}},
-                "font": { "color": "#0F172A", "size": 12},
+                "title": {"text": "Map layers", "font": {"color": "#00ff41", "size": 13}},
+                "font": {"color": "#00ff41", "size": 11},
                 "yanchor": "top",
                 "y": 0.99,
                 "xanchor": "right",
                 "x": 0.99,
-                "bgcolor": "rgba(255, 255, 255, 0.86)",
-                "bordercolor": "rgba(248, 250, 252, 0.35)",
+                "bgcolor": "rgba(10, 10, 10, 0.88)",
+                "bordercolor": "rgba(0, 255, 65, 0.40)",
                 "borderwidth": 1,
             },
         )
@@ -690,10 +702,70 @@ def main() -> None:
             fig,
             use_container_width=True,
             config={
-                "scrollZoom": enable_scroll_zoom,
+                "scrollZoom": True,
                 "displaylogo": False,
             },
         )
+
+        # ── Responsive legend handling ─────────────────────────────────────────
+        # Desktop: the Plotly legend panel and colorbar float over the map.
+        # Mobile:  CSS hides those overlays; a custom HTML section appears below.
+        st.markdown(
+            """
+            <style>
+            @media (max-width: 768px) {
+                /* Hide Plotly floating overlays on mobile */
+                .js-plotly-plot .legend { display: none !important; }
+                .js-plotly-plot .colorbar { display: none !important; }
+                /* Reveal the mobile legend section */
+                .mobile-map-legend { display: block !important; }
+            }
+            .mobile-map-legend { display: none; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if size_legend_bins:
+            # Scale dot sizes to em units: map [6, 18]px range to [0.55, 1.3]em.
+            def _px_to_em(dot_px: float) -> float:
+                return round(0.55 + (dot_px - 6) / (18 - 6) * 0.75, 2)
+
+            dot_parts = []
+            for count, dot_px in size_legend_bins:
+                em = _px_to_em(dot_px)
+                dot_parts.append(
+                    f'<span style="font-size:{em}em; color:#00ff41; line-height:1;">&#11044;</span>'
+                    f'<span style="font-size:0.75em; color:#888; margin-left:3px;">{count}</span>'
+                )
+            dots_html = '<span style="margin:0 8px; color:#333;"> &middot; </span>'.join(dot_parts)
+            metric_label = colorbar_title_lookup[map_metric_label]
+            st.markdown(
+                f"""
+                <div class="mobile-map-legend"
+                     style="padding:10px 0 4px; font-family:monospace;">
+                  <!-- Gradient colorbar strip -->
+                  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <span style="font-size:0.72em; color:#888; white-space:nowrap;">Low</span>
+                    <div style="
+                      flex:1;
+                      height:13px;
+                      background:linear-gradient(to right,#001a00,#005500,#00aa33,#00ff41,#aaffaa);
+                      border-radius:3px;
+                      border:1px solid rgba(0,255,65,0.3);
+                    "></div>
+                    <span style="font-size:0.72em; color:#888; white-space:nowrap;">High</span>
+                  </div>
+                  <div style="text-align:center; font-size:0.7em; color:#666;
+                              margin-bottom:8px;">{metric_label}</div>
+                  <!-- Marker size legend -->
+                  <div style="text-align:center; font-size:0.78em; color:#888;">
+                    Marker size&nbsp;&rarr;&nbsp;complaints:&nbsp;&nbsp;{dots_html}
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     with tab_trends:
         if city_daily.empty:
@@ -715,7 +787,9 @@ def main() -> None:
                     y=city_daily[trend_value_col],
                     mode="lines" if trend_chart_style == "Line + complaints" else "lines+markers",
                     name=f"Citywide {trend_metric_label} average",
-                    line={"width": 2},
+                    line={"width": 2, "color": "#00ff41"},
+                    marker={"color": "#00ff41"},
+                    fillcolor="rgba(0, 255, 65, 0.15)",
                     fill="tozeroy" if trend_chart_style == "Area + complaints" else None,
                 ),
                 secondary_y=False,
@@ -725,14 +799,21 @@ def main() -> None:
                     x=city_daily["date"],
                     y=city_daily["complaint_count"],
                     name="Daily complaints",
-                    opacity=0.35,
+                    marker_color="#4a9a5a",
+                    opacity=0.45,
                 ),
                 secondary_y=True,
             )
             trend.update_layout(
                 title=f"{trend_metric_label} vs 311 Complaints Over Time",
                 margin={"l": 0, "r": 0, "t": 45, "b": 45},
-                legend={"orientation": "h", "y": 1.08},
+                legend={"orientation": "h", "y": 1.04},
+                paper_bgcolor="#0a0a0a",
+                plot_bgcolor="#0a0a0a",
+                font={"color": "#e0e0e0", "family": "monospace"},
+                title_font={"color": "#00ff41"},
+                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
             )
             trend.update_yaxes(title_text=trend_value_title, secondary_y=False)
             trend.update_yaxes(title_text="Complaint count", secondary_y=True)
@@ -778,7 +859,8 @@ def main() -> None:
                     calendar_fig = px.imshow(
                         calendar_pivot,
                         aspect="auto",
-                        color_continuous_scale="YlOrRd",
+                        # Color scheme for calendar heatmap
+                        color_continuous_scale=[[0, "#001a00"], [0.5, "#00aa33"], [1, "#00ff41"]],
                         labels={
                             "x": "Day of week",
                             "y": "Week starting",
@@ -786,7 +868,13 @@ def main() -> None:
                         },
                         title=f"{calendar_metric_label} calendar heatmap ({selected_month})",
                     )
-                    calendar_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+                    calendar_fig.update_layout(
+                        margin={"l": 0, "r": 0, "t": 45, "b": 0},
+                        paper_bgcolor="#0a0a0a",
+                        plot_bgcolor="#0a0a0a",
+                        font={"color": "#e0e0e0", "family": "monospace"},
+                        title_font={"color": "#00ff41"},
+                    )
                     st.plotly_chart(calendar_fig, use_container_width=True)
 
     with tab_neighborhood:
@@ -807,17 +895,49 @@ def main() -> None:
                 y="neighborhood",
                 orientation="h",
                 color=ranking_value_col,
-                color_continuous_scale="YlOrRd",
+                # Color scheme for neighborhood trends tab
+                color_continuous_scale=[[0, "#001a00"], [0.5, "#00aa33"], [1, "#00ff41"]],
                 title=f"Top 15 neighborhoods by {trend_metric_label} in selected period",
                 labels={
                     "neighborhood": "Neighborhood",
                     ranking_value_col: ranking_value_title,
                 },
             )
-            rank_fig.update_layout(yaxis={"categoryorder": "total ascending"}, margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            rank_fig.update_layout(
+                yaxis={"categoryorder": "total ascending"},
+                margin={"l": 0, "r": 0, "t": 45, "b": 0},
+                paper_bgcolor="#0a0a0a",
+                plot_bgcolor="#0a0a0a",
+                font={"color": "#e0e0e0", "family": "monospace"},
+                title_font={"color": "#00ff41"},
+                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+                yaxis2={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+            )
             st.plotly_chart(rank_fig, use_container_width=True)
 
     with tab_lag:
+        with st.expander("About these charts", expanded=False):
+            st.markdown(
+                """
+                **Lead-lag correlation** asks: when PM2.5 is elevated on day *t*, \
+does complaint activity rise or fall on day *t + lag*? \
+Positive lags (right side of the chart) mean complaints *trail* pollution — \
+residents react after sensors register a spike. \
+Negative lags mean complaints *precede* measured pollution — \
+possibly capturing smell/odor reports before instruments register them. \
+A bar near zero correlation at a given lag means pollution levels at that delay \
+have little predictive relationship with complaints.
+
+                **Complaint response around spike days** identifies every day in the \
+selected window where city-wide average PM2.5 is in the top *N%* (set in the sidebar), \
+then averages complaint counts at offsets −2 through +2 days around those events. \
+The dashed baseline is the mean complaint count on *non-spike* days. \
+A line rising above the baseline on days 0–2 suggests complaints measurably follow \
+pollution spikes; a line below baseline on day −1 or −2 could indicate \
+anticipatory or odor-driven reporting.
+                """
+            )
+
         lag_df = compute_lag_correlations(city_daily, max_lag=7)
         if lag_df.empty:
             st.warning("No rows in selected range.")
@@ -827,11 +947,19 @@ def main() -> None:
                 x="lag_days",
                 y="correlation",
                 color="correlation",
-                color_continuous_scale="RdBu",
+                color_continuous_scale=[[0, "#550000"], [0.5, "#1a3a1a"], [1, "#00ff41"]],
                 range_color=[-1, 1],
                 title="Lead-lag correlation: PM2.5(t) vs Complaints(t+lag)",
             )
-            lag_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            lag_fig.update_layout(
+                margin={"l": 0, "r": 0, "t": 45, "b": 0},
+                paper_bgcolor="#0a0a0a",
+                plot_bgcolor="#0a0a0a",
+                font={"color": "#e0e0e0", "family": "monospace"},
+                title_font={"color": "#00ff41"},
+                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+            )
             st.plotly_chart(lag_fig, use_container_width=True)
 
             valid = lag_df.dropna(subset=["correlation"]).copy()
@@ -843,19 +971,36 @@ def main() -> None:
                     f"with correlation {best['correlation']:.3f}."
                 )
 
-            spike_df, baseline = compute_spike_concordance(city_daily, threshold=35.0, window_days=2)
+            spike_percentile = spike_percentile_pct / 100.0
+            spike_df, baseline = compute_spike_concordance(
+                city_daily,
+                spike_percentile=spike_percentile,
+                window_days=2,
+            )
+            spike_title = (
+                f"Complaint response around PM2.5 spike days "
+                f"(top {100 - spike_percentile_pct}%, city-level)"
+            )
             spike_fig = px.line(
                 spike_df,
                 x="offset_day",
                 y="mean_complaints",
                 markers=True,
-                title="Complaint response around PM2.5 spike days (city-level)",
+                title=spike_title,
             )
             if not np.isnan(baseline):
-                spike_fig.add_hline(y=baseline, line_dash="dash", annotation_text="non-spike baseline")
+                spike_fig.add_hline(y=baseline, line_dash="dash", line_color="#888888", annotation_text="non-spike baseline", annotation_font_color="#888888")
             spike_fig.update_xaxes(dtick=1, title="Days relative to spike day")
             spike_fig.update_yaxes(title="Mean complaints")
-            spike_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            spike_fig.update_layout(
+                margin={"l": 0, "r": 0, "t": 45, "b": 0},
+                paper_bgcolor="#0a0a0a",
+                plot_bgcolor="#0a0a0a",
+                font={"color": "#e0e0e0", "family": "monospace"},
+                title_font={"color": "#00ff41"},
+                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
+            )
             st.plotly_chart(spike_fig, use_container_width=True)
 
     with tab_quality:
