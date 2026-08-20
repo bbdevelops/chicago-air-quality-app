@@ -38,6 +38,7 @@ chicago-air-quality-app/
 │   ├── assign_neighborhoods.py     # Point-in-polygon neighborhood assignment
 │   ├── merge_datasets.py           # Join sensor readings + complaint counts
 │   ├── build_neighborhood_summary.py   # One-row-per-neighborhood summary
+│   ├── aggregate_hourly_to_daily.py    # Off-pipeline: hourly raw CSV → daily schema
 │   ├── load_sqlite.py              # Load clean CSVs → SQLite database
 │   └── sql_queries.sql             # Example analytical SQL queries
 │
@@ -58,7 +59,8 @@ chicago-air-quality-app/
 │   └── citizen_sensor.db           # SQLite database (3 tables)
 │
 ├── notebooks/
-│   └── eda.ipynb                   # Exploratory analysis notebook
+│   ├── eda.ipynb                   # Exploratory analysis notebook
+│   └── complaint_air_correlation.ipynb  # Guided correlation walkthrough
 │
 ├── logs/                           # Pipeline run logs (timestamped)
 │
@@ -109,6 +111,9 @@ python run_pipeline.py --skip-api
 
 # Force re-download from API
 python run_pipeline.py --force
+
+# Also pull EPA AQS regulatory reference monitors (needs EPA_API_* in .env)
+python run_pipeline.py --with-epa
 ```
 
 ### 4. Explore the data
@@ -130,10 +135,12 @@ using the same pipeline outputs in `data/clean/`:
 
 ### Features
 
+- **EPA Air Quality Index (AQI)** using the official 2024-revised PM2.5 breakpoints — an AQI hero banner with health guidance, an AQI map metric, and AQI health-color bands
+- **Theme toggle**: dark "Terminal" look or a light, high-contrast **Accessible** palette (EPA health colors), switchable from the sidebar
 - Dual map modes: **Neighborhood choropleth** (default) and **Continuous heatmap**
 - Neighborhood polygon overlay from `chicago_neighborhoods.geojson`
 - Sensor marker overlay (PM2.5 and complaint totals)
-- IDW placeholder estimates for neighborhoods with no direct sensor-period values
+- IDW placeholder estimates for neighborhoods with no direct sensor-period values, with adjustable k / distance-power / max-distance controls
 - Dual-axis daily trend chart (PM2.5 vs complaints)
 - Lead-lag correlation chart and spike-window concordance view
 - Coverage QA tab with `coverage_source` diagnostics (`direct`, `estimated_idw`, `unavailable`)
@@ -264,6 +271,7 @@ The following were planned but removed as non-functional stubs:
 |--------|------|--------|
 | [CDPH Environmental Complaints](https://data.cityofchicago.org/d/fypr-ksnz) | 311 air pollution work orders | Socrata API (free) |
 | [Open Air Chicago Day Aggregations](https://data.cityofchicago.org/d/rtmx-vkjr) | PM2.5 and NO2 daily means | Socrata API (free) |
+| [EPA Air Quality System (AQS)](https://aqs.epa.gov/aqsweb/documents/data_api.html) | Regulatory PM2.5/NO2 reference monitors + AQI (Cook County) | AQS API (free; optional, `--with-epa`) |
 | Chicago Neighborhoods 2012b | Official boundary polygons | Included in `data/` |
 
 ---
