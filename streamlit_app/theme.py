@@ -128,20 +128,39 @@ def style_fig(fig: go.Figure, theme: dict[str, Any], *, axes: bool = True) -> go
 def chrome_css(theme: dict[str, Any]) -> str:
     """CSS to flip the Streamlit chrome (background, text, sidebar) to the theme.
 
-    Kept intentionally broad so it survives minor Streamlit DOM changes; only
-    emitted for the non-default (Accessible) theme, since config.toml already
-    paints the default dark chrome.
+    Only emitted for the non-default (Accessible) theme, since config.toml
+    already paints the default dark chrome.
+
+    IMPORTANT: ``font-family`` is deliberately NOT applied to bare ``<span>``.
+    Streamlit renders Material Symbols icons (the sidebar ``>>`` collapse control,
+    expander chevrons) as ``<span>`` ligatures backed by the "Material Symbols
+    Rounded" font. Overriding their font turns the glyph into raw ligature text
+    like ``keyboard_double_arrow_right`` / ``arrow_right``, which also overlaps
+    nearby text. Color is safe to set broadly (icons render in ``currentColor``).
     """
     return f"""
     <style>
     .stApp {{ background-color: {theme['app_bg']}; }}
+    /* Text color — safe on spans (does not affect icon glyph rendering). */
     .stApp, .stApp p, .stApp label, .stApp span, .stApp li,
     .stMarkdown, [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
         color: {theme['font_color']};
+    }}
+    /* Font family — text containers only, NEVER bare span (see docstring). */
+    .stApp, .stApp p, .stApp label, .stApp li, .stMarkdown,
+    .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+    [data-testid="stMetricValue"], [data-testid="stMetricLabel"] {{
         font-family: {theme['font_family']};
     }}
     .stApp h1, .stApp h2, .stApp h3, .stApp h4 {{ color: {theme['font_color']}; }}
     [data-testid="stSidebar"] {{ background-color: {theme['secondary_bg']}; }}
     [data-testid="stHeader"] {{ background-color: {theme['app_bg']}; }}
+    /* Belt-and-suspenders: keep Material icon glyphs rendering as icons even if
+       a future rule tries to restyle their font. */
+    [data-testid="stIconMaterial"],
+    [data-testid="stExpanderIcon"],
+    [data-testid="stSidebarCollapseButton"] span {{
+        font-family: "Material Symbols Rounded" !important;
+    }}
     </style>
     """
