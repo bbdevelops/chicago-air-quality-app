@@ -1,0 +1,27 @@
+# Project metadata and tool configuration for the Chicago Air Quality project.
+# The app itself is run from source (see requirements.txt); this file exists for
+# tooling (ruff, pytest) and to record project metadata. No build-system is
+# declared, so `pip install .` is intentionally not the install path.
+
+[project]
+name = "chicago-air-quality-app"
+version = "0.2.0"
+description = "Links Chicago 311 air-pollution complaints with Open Air Chicago sensor readings, with EPA AQI and an interactive Streamlit dashboard."
+readme = "README.md"
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+extend-exclude = [".venv", "notebooks"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle, F: pyflakes, I: import sorting, B: bugbear, UP: pyupgrade.
+select = ["E", "W", "F", "I", "B", "UP"]
+# The dashboard intentionally builds long f-string HTML/hovertemplate lines.
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"

@@ -15,13 +15,13 @@ Respectful API usage:
   - Uses $where date filter to minimize payload
 """
 
+import argparse
+import configparser
+import logging
 import os
 import sys
 import time
-import argparse
-import logging
 from pathlib import Path
-import configparser
 
 import pandas as pd
 from dotenv import load_dotenv
