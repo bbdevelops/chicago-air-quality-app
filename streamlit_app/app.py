@@ -13,6 +13,9 @@ from plotly.subplots import make_subplots
 try:
     # Works when launched from project root as a package import.
     from streamlit_app.dashboard_data import (
+        add_aqi_columns,
+        aqi_category,
+        aqi_health_message,
         build_city_daily_metrics,
         build_neighborhood_metrics,
         build_sensor_snapshot,
@@ -22,10 +25,22 @@ try:
         filter_complaint_points,
         filter_merged_data,
         load_pipeline_data,
+        pm25_to_aqi,
+    )
+    from streamlit_app.theme import (
+        AQI_COLORSCALE,
+        AQI_CSS_GRADIENT,
+        AQI_RANGE,
+        chrome_css,
+        get_theme,
+        style_fig,
     )
 except ModuleNotFoundError:
     # Works when Streamlit executes this file as a direct script.
     from dashboard_data import (  # type: ignore
+        add_aqi_columns,
+        aqi_category,
+        aqi_health_message,
         build_city_daily_metrics,
         build_neighborhood_metrics,
         build_sensor_snapshot,
@@ -35,16 +50,59 @@ except ModuleNotFoundError:
         filter_complaint_points,
         filter_merged_data,
         load_pipeline_data,
+        pm25_to_aqi,
+    )
+    from theme import (  # type: ignore
+        AQI_COLORSCALE,
+        AQI_CSS_GRADIENT,
+        AQI_RANGE,
+        chrome_css,
+        get_theme,
+        style_fig,
     )
 
 
 st.set_page_config(
     page_title="Chicago Air Quality Explorer",
-    page_icon="wind_face",
+    page_icon=":wind_face:",
     layout="wide",
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+# Human-readable labels for NEIGHBORHOOD-level columns — used both for choropleth
+# hover cards and the Coverage QA tables. One source of truth so the two views
+# never drift apart. Each source column maps to a distinct label, so these are
+# safe to use with DataFrame.rename (no collisions).
+COLUMN_LABELS = {
+    "neighborhood": "Neighborhood",
+    "neighborhood_secondary": "Neighborhood alias",
+    "coverage_source": "Coverage source",
+    "sensor_count": "Sensors in neighborhood",
+    "pm25_aqi_map_value": "Air Quality Index (PM2.5)",
+    "pm25_map_value": "PM2.5 average (ug/m3)",
+    "pm25_mean_period": "PM2.5 direct value (ug/m3)",
+    "pm25_mean_estimated": "PM2.5 IDW estimate (ug/m3)",
+    "no2_map_value": "NO2 average (ppb)",
+    "no2_mean_period": "NO2 direct value (ppb)",
+    "no2_mean_estimated": "NO2 IDW estimate (ppb)",
+    "complaints_map_value": "Complaints (period)",
+    "complaints_period": "Complaints direct value",
+    "complaints_estimated": "Complaints IDW estimate",
+    "estimated_sensor_count": "Sensors used for estimate",
+    "estimated_nearest_km": "Nearest sensor distance (km)",
+}
+
+# Extra labels for SENSOR-snapshot columns, used only for the continuous-heatmap
+# hover card. Kept separate because some share display text with neighborhood
+# columns (e.g. total_complaints ↔ complaints_map_value) and would collide if
+# used to rename the neighborhood table.
+HOVER_EXTRA_LABELS = {
+    "pm25_mean": "PM2.5 average (ug/m3)",
+    "no2_mean": "NO2 average (ppb)",
+    "total_complaints": "Complaints (period)",
+    "active_days": "Active sensor days",
+}
 
 
 @st.cache_data(show_spinner=False)
@@ -75,7 +133,9 @@ def normalize_date_range(selection: object, fallback_start: date, fallback_end: 
     return fallback_start, fallback_end
 
 
-def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str, object]) -> None:
+def add_neighborhood_boundaries(
+    fig: go.Figure, neighborhoods_geojson: dict[str, object], line_color: str
+) -> None:
     """Overlay neighborhood boundary lines for map orientation."""
     features = neighborhoods_geojson.get("features", [])
     if not isinstance(features, list):
@@ -118,7 +178,7 @@ def add_neighborhood_boundaries(fig: go.Figure, neighborhoods_geojson: dict[str,
                     lon=lons,
                     lat=lats,
                     mode="lines",
-                    line={"color": "rgba(0, 255, 65, 0.25)", "width": 1},
+                    line={"color": line_color, "width": 1},
                     hoverinfo="skip",
                     showlegend=False,
                     name="Neighborhood boundary",
@@ -190,7 +250,9 @@ def sensor_size_legend_counts(complaint_counts: pd.Series) -> list[int]:
     return unique_bins
 
 
-def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> list[tuple[int, float]]:
+def add_sensor_markers(
+    fig: go.Figure, sensors: pd.DataFrame, theme: dict[str, object]
+) -> list[tuple[int, float]]:
     """Add sensor markers sized by complaint totals.
 
     Returns a list of (complaint_count, pixel_size) tuples so the caller can
@@ -208,8 +270,7 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> list[tuple[int,
             marker={
                 "size": marker_sizes,
                 "color": sensors["pm25_mean"],
-                # Color scheme for sensor markers
-                "colorscale": [[0, "#003300"], [0.25, "#00aa33"], [0.5, "#00ff41"], [0.75, "#aaff44"], [1, "#ffffff"]],
+                "colorscale": theme["marker_scale"],
                 "showscale": False,
                 "opacity": 0.85,
             },
@@ -250,7 +311,7 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> list[tuple[int,
                 lat=[None],
                 lon=[None],
                 mode="markers",
-                marker={"size": legend_size, "color": "#00ff41", "opacity": 0.85},
+                marker={"size": legend_size, "color": theme["marker_solid"], "opacity": 0.85},
                 hoverinfo="skip",
                 name=f"{count} complaints",
                 showlegend=True,
@@ -259,7 +320,9 @@ def add_sensor_markers(fig: go.Figure, sensors: pd.DataFrame) -> list[tuple[int,
     return bin_data
 
 
-def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
+def add_complaint_locations(
+    fig: go.Figure, complaints: pd.DataFrame, marker_color: str
+) -> None:
     """Add complaint-level geocoded points as a toggleable overlay."""
     if complaints.empty:
         return
@@ -273,7 +336,7 @@ def add_complaint_locations(fig: go.Figure, complaints: pd.DataFrame) -> None:
             mode="markers",
             marker={
                 "size": 7,
-                "color": "#00ff41",
+                "color": marker_color,
                 "opacity": 0.95,
             },
             text=complaints["complaint_id"].astype(str),
@@ -316,6 +379,16 @@ def main() -> None:
     max_date = merged["date"].max().date()
 
     with st.sidebar:
+        theme_name = st.radio(
+            "Theme",
+            options=["Terminal", "Accessible"],
+            index=0,
+            horizontal=True,
+            help="Terminal keeps the dark neon look. Accessible switches to a light, "
+            "high-contrast palette using official EPA AQI health colors.",
+        )
+        theme = get_theme(theme_name)
+
         st.header("Filters")
         date_selection = st.date_input(
             "Date range",
@@ -324,6 +397,8 @@ def main() -> None:
             max_value=max_date,
         )
         start_date, end_date = normalize_date_range(date_selection, min_date, max_date)
+        if isinstance(date_selection, (tuple, list)) and len(date_selection) == 1:
+            st.caption("Pick an end date to complete the range — showing a single day until then.")
 
         neighborhood_options = sorted(summary["neighborhood"].dropna().unique())
         selected_neighborhoods = st.multiselect(
@@ -336,11 +411,13 @@ def main() -> None:
         map_metric_label = st.selectbox(
             "Map metric",
             options=[
+                "Air Quality Index (PM2.5)",
                 "PM2.5 mean (selected period)",
                 "NO2 mean (selected period)",
                 "Complaints (selected period)",
                 "Sensor coverage (all-time)",
             ],
+            help="Air Quality Index uses the official EPA 2024 PM2.5 breakpoints and health colors.",
         )
 
         st.subheader("Temporal trends")
@@ -391,7 +468,6 @@ def main() -> None:
             value=False,
             help="Overlay geocoded complaint points for the selected date range and neighborhood filter.",
         )
-        # Mouse-wheel zoom is always enabled.
         map_height_px = st.slider(
             "Map height (px)",
             min_value=500,
@@ -402,7 +478,7 @@ def main() -> None:
         )
 
         st.caption("Color scale layout")
-        # Compact color scale is always on; sliders let desktop users fine-tune.
+        # Sliders let desktop users fine-tune the floating colorbar overlay.
         color_scale_width_px = st.slider(
             "Color scale thickness (px)",
             min_value=8,
@@ -426,6 +502,37 @@ def main() -> None:
             format="%.2f",
             help="Shifts the colorbar left or right along the bottom of the map.",
         )
+
+        with st.expander("Neighborhood estimation (IDW)", expanded=False):
+            st.caption(
+                "Neighborhoods without direct sensor readings are filled using "
+                "inverse-distance weighting from nearby sensors. Tune the estimator here."
+            )
+            idw_k = st.slider(
+                "Nearest sensors (k)",
+                min_value=1,
+                max_value=8,
+                value=3,
+                help="How many nearby sensors contribute to each estimate.",
+            )
+            idw_power = st.slider(
+                "Distance power",
+                min_value=1.0,
+                max_value=4.0,
+                value=2.0,
+                step=0.5,
+                help="Higher values weight the closest sensors more heavily.",
+            )
+            idw_max_km = st.slider(
+                "Max sensor distance (km)",
+                min_value=2,
+                max_value=40,
+                value=15,
+                help="Sensors farther than this are ignored; neighborhoods with none stay 'unavailable'.",
+            )
+
+    if theme["name"] != "Terminal":
+        st.markdown(chrome_css(theme), unsafe_allow_html=True)
 
     filtered = filter_merged_data(
         merged=merged,
@@ -458,20 +565,23 @@ def main() -> None:
         city_daily["complaint_count"] = city_daily["complaint_count"].fillna(0)
         city_daily["spike_sensor_days"] = city_daily["spike_sensor_days"].fillna(0)
     sensors = build_sensor_snapshot(filtered)
+    sensors = add_aqi_columns(sensors, pm25_col="pm25_mean")
     map_metrics = enrich_neighborhood_metrics_with_estimates(
         neighborhood_metrics=base_map_metrics,
         sensors=sensors,
         neighborhoods_geojson=data.neighborhoods_geojson,
-        k=3,
-        idw_power=2.0,
-        max_distance_km=15.0,
+        k=idw_k,
+        idw_power=idw_power,
+        max_distance_km=float(idw_max_km),
     )
+    # Neighborhood-level AQI derived from the (direct or estimated) PM2.5 value.
+    map_metrics["pm25_aqi_map_value"] = map_metrics["pm25_map_value"].map(pm25_to_aqi)
 
     if show_quick_tour:
         with st.expander("Quick tour: how to use this dashboard", expanded=False):
             st.markdown(
                 """
-                1. Set your date range and optionally focus on specific neighborhoods.
+                1. Click >> in the upper left corner to open filter menu. Set your date range and optionally focus on specific neighborhoods.
                 2. Start in Neighborhood Map to compare air conditions and complaint activity.
                 3. Use Temporal Trends to explore citywide day-to-day patterns and calendar seasonality.
                 4. Visit Neighborhood Trends for ranked neighborhood comparisons.
@@ -501,6 +611,33 @@ def main() -> None:
 
     current_sensors = int(filtered["sensor_name"].nunique()) if not filtered.empty else 0
     previous_sensors = int(previous_filtered["sensor_name"].nunique()) if not previous_filtered.empty else 0
+
+    # ── AQI hero banner ────────────────────────────────────────────────────
+    # Translate the selection-average PM2.5 into the public-facing EPA AQI so the
+    # headline number is the one people recognize, with a plain-language health line.
+    current_aqi = pm25_to_aqi(current_pm25) if not np.isnan(current_pm25) else float("nan")
+    aqi_label, aqi_color = aqi_category(current_aqi)
+    aqi_message = aqi_health_message(current_aqi)
+    aqi_value_text = f"{current_aqi:.0f}" if not np.isnan(current_aqi) else "n/a"
+    # Dark text on the light-yellow/green bands, white elsewhere, for contrast.
+    text_color = "#1a1a1a" if aqi_label in ("Good", "Moderate") else "#ffffff"
+    st.markdown(
+        f"""
+        <div style="background:{aqi_color}; border-radius:10px; padding:14px 18px;
+                    margin-bottom:14px; display:flex; align-items:center; gap:18px;
+                    flex-wrap:wrap; color:{text_color};">
+          <div style="font-size:2.4em; font-weight:700; line-height:1;">{aqi_value_text}</div>
+          <div style="min-width:180px;">
+            <div style="font-size:1.15em; font-weight:700;">Air Quality Index &mdash; {aqi_label}</div>
+            <div style="font-size:0.9em; opacity:0.92;">{aqi_message}</div>
+          </div>
+          <div style="font-size:0.78em; opacity:0.85; margin-left:auto;">
+            Based on average PM2.5 in the selected window (EPA 2024 breakpoints).
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric(
@@ -533,29 +670,8 @@ def main() -> None:
     )
 
     with tab_map:
-        map_label_lookup = {
-            "neighborhood": "Neighborhood",
-            "neighborhood_secondary": "Neighborhood alias",
-            "coverage_source": "Coverage source",
-            "sensor_count": "Sensors in neighborhood",
-            "pm25_map_value": "PM2.5 average (ug/m3)",
-            "pm25_mean_period": "PM2.5 direct value (ug/m3)",
-            "pm25_mean_estimated": "PM2.5 IDW estimate (ug/m3)",
-            "no2_map_value": "NO2 average (ppb)",
-            "no2_mean_period": "NO2 direct value (ppb)",
-            "no2_mean_estimated": "NO2 IDW estimate (ppb)",
-            "complaints_map_value": "Complaints (period)",
-            "complaints_period": "Complaints direct value",
-            "complaints_estimated": "Complaints IDW estimate",
-            "estimated_sensor_count": "Sensors used for estimate",
-            "estimated_nearest_km": "Nearest sensor distance (km)",
-            "pm25_mean": "PM2.5 average (ug/m3)",
-            "no2_mean": "NO2 average (ppb)",
-            "total_complaints": "Complaints (period)",
-            "active_days": "Active sensor days",
-        }
-
         colorbar_title_lookup = {
+            "Air Quality Index (PM2.5)": "AQI",
             "PM2.5 mean (selected period)": "PM2.5 Avg.",
             "NO2 mean (selected period)": "NO2 Avg.",
             "Complaints (selected period)": "Complaints",
@@ -563,6 +679,7 @@ def main() -> None:
         }
 
         choropleth_metric_lookup = {
+            "Air Quality Index (PM2.5)": "pm25_aqi_map_value",
             "PM2.5 mean (selected period)": "pm25_map_value",
             "NO2 mean (selected period)": "no2_map_value",
             "Complaints (selected period)": "complaints_map_value",
@@ -570,16 +687,24 @@ def main() -> None:
         }
 
         heatmap_metric_lookup = {
+            "Air Quality Index (PM2.5)": "pm25_aqi",
             "PM2.5 mean (selected period)": "pm25_mean",
             "NO2 mean (selected period)": "no2_mean",
             "Complaints (selected period)": "total_complaints",
             "Sensor coverage (all-time)": "active_days",
         }
 
+        is_aqi_metric = map_metric_label == "Air Quality Index (PM2.5)"
+        # AQI uses the fixed EPA band scale over 0–500 so colors are absolute;
+        # other metrics use the active theme's sequential/density ramp.
+        choropleth_scale = AQI_COLORSCALE if is_aqi_metric else theme["sequential"]
+        density_scale = AQI_COLORSCALE if is_aqi_metric else theme["density"]
+        metric_range = list(AQI_RANGE) if is_aqi_metric else None
+
         if map_mode == "Neighborhood choropleth":
             st.caption(
                 "Neighborhoods without direct sensor-period values are filled using IDW placeholders "
-                "from nearby sensors (k=3, max distance=15 km)."
+                f"from nearby sensors (k={idw_k}, max distance={idw_max_km} km)."
             )
 
             color_col = choropleth_metric_lookup[map_metric_label]
@@ -606,10 +731,10 @@ def main() -> None:
                     "estimated_sensor_count": True,
                     "estimated_nearest_km": ":.2f",
                 },
-                labels=map_label_lookup,
-                # Color scheme for neighborhood map, neighborhood polygons
-                color_continuous_scale=[[0, "#001a00"], [0.25, "#005500"], [0.5, "#00aa33"], [0.75, "#00ff41"], [1, "#aaffaa"]],
-                map_style="carto-darkmatter",
+                labels=COLUMN_LABELS,
+                color_continuous_scale=choropleth_scale,
+                range_color=metric_range,
+                map_style=theme["map_style"],
                 center={"lat": 41.8781, "lon": -87.6298},
                 zoom=9,
                 opacity=0.58,
@@ -623,7 +748,7 @@ def main() -> None:
                 fig = go.Figure()
                 fig.update_layout(
                     map={
-                        "style": "carto-positron",
+                        "style": theme["map_style"],
                         "center": {"lat": 41.8781, "lon": -87.6298},
                         "zoom": 9,
                     }
@@ -643,23 +768,23 @@ def main() -> None:
                         "total_complaints": True,
                         "active_days": True,
                     },
-                    labels=map_label_lookup,
-                    #Color scheme for neighborhood map, "continuous heatmap" mode
-                    color_continuous_scale=[[0, "#000000"], [0.25, "#003300"], [0.5, "#00aa33"], [0.75, "#00ff41"], [1, "#ccffcc"]],
-                    map_style="carto-darkmatter",
+                    labels={**COLUMN_LABELS, **HOVER_EXTRA_LABELS},
+                    color_continuous_scale=density_scale,
+                    range_color=metric_range,
+                    map_style=theme["map_style"],
                     center={"lat": 41.8781, "lon": -87.6298},
                     zoom=9,
                     title="Continuous sensor density heatmap",
                 )
 
-            add_neighborhood_boundaries(fig, data.neighborhoods_geojson)
+            add_neighborhood_boundaries(fig, data.neighborhoods_geojson, theme["boundary_line"])
 
         size_legend_bins: list[tuple[int, float]] = []
         if show_sensor_markers:
-            size_legend_bins = add_sensor_markers(fig, sensors)
+            size_legend_bins = add_sensor_markers(fig, sensors, theme)
 
         if show_complaint_locations:
-            add_complaint_locations(fig, complaint_points)
+            add_complaint_locations(fig, complaint_points, theme["marker_solid"])
 
         # Colorbar: vertical floating overlay on the right side (desktop).
         # On mobile the Plotly colorbar is hidden via CSS; a custom HTML bar shows below.
@@ -672,13 +797,13 @@ def main() -> None:
             colorbar_xanchor="right",
             colorbar_y=0.5,
             colorbar_yanchor="middle",
-            colorbar_tickfont={"size": 10, "color": "#00ff41"},
-            colorbar_title_font={"size": 11, "color": "#00ff41"},
-            colorbar_bgcolor="rgba(10, 10, 10, 0.88)",
-            colorbar_bordercolor="rgba(0, 255, 65, 0.35)",
-            colorbar_borderwidth=.11,
+            colorbar_tickfont={"size": 10, "color": theme["accent"]},
+            colorbar_title_font={"size": 11, "color": theme["accent"]},
+            colorbar_bgcolor=theme["panel_bg"],
+            colorbar_bordercolor=theme["panel_border"],
+            colorbar_borderwidth=1,
             colorbar_outlinewidth=1,
-            colorbar_outlinecolor="rgba(0, 255, 65, 0.5)",
+            colorbar_outlinecolor=theme["panel_border"],
         )
 
         fig.update_layout(
@@ -687,20 +812,20 @@ def main() -> None:
             uirevision="map-view",
             # Legend only shows toggleable layer names (sensor markers, complaints).
             legend={
-                "title": {"text": "Map layers", "font": {"color": "#00ff41", "size": 13}},
-                "font": {"color": "#00ff41", "size": 11},
+                "title": {"text": "Map layers", "font": {"color": theme["accent"], "size": 13}},
+                "font": {"color": theme["accent"], "size": 11},
                 "yanchor": "top",
                 "y": 0.99,
                 "xanchor": "right",
                 "x": 0.99,
-                "bgcolor": "rgba(10, 10, 10, 0.88)",
-                "bordercolor": "rgba(0, 255, 65, 0.40)",
+                "bgcolor": theme["panel_bg"],
+                "bordercolor": theme["panel_border"],
                 "borderwidth": 1,
             },
         )
         st.plotly_chart(
             fig,
-            use_container_width=True,
+            width="stretch",
             config={
                 "scrollZoom": True,
                 "displaylogo": False,
@@ -735,31 +860,33 @@ def main() -> None:
             for count, dot_px in size_legend_bins:
                 em = _px_to_em(dot_px)
                 dot_parts.append(
-                    f'<span style="font-size:{em}em; color:#00ff41; line-height:1;">&#11044;</span>'
-                    f'<span style="font-size:0.75em; color:#888; margin-left:3px;">{count}</span>'
+                    f'<span style="font-size:{em}em; color:{theme["marker_solid"]}; line-height:1;">&#11044;</span>'
+                    f'<span style="font-size:0.75em; color:{theme["muted"]}; margin-left:3px;">{count}</span>'
                 )
-            dots_html = '<span style="margin:0 8px; color:#333;"> &middot; </span>'.join(dot_parts)
+            dots_html = f'<span style="margin:0 8px; color:{theme["muted"]};"> &middot; </span>'.join(dot_parts)
             metric_label = colorbar_title_lookup[map_metric_label]
+            legend_gradient = AQI_CSS_GRADIENT if is_aqi_metric else theme["css_gradient"]
+            low_label, high_label = ("0", "500") if is_aqi_metric else ("Low", "High")
             st.markdown(
                 f"""
                 <div class="mobile-map-legend"
-                     style="padding:10px 0 4px; font-family:monospace;">
+                     style="padding:10px 0 4px; font-family:{theme['font_family']};">
                   <!-- Gradient colorbar strip -->
                   <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-                    <span style="font-size:0.72em; color:#888; white-space:nowrap;">Low</span>
+                    <span style="font-size:0.72em; color:{theme['muted']}; white-space:nowrap;">{low_label}</span>
                     <div style="
                       flex:1;
                       height:13px;
-                      background:linear-gradient(to right,#001a00,#005500,#00aa33,#00ff41,#aaffaa);
+                      background:{legend_gradient};
                       border-radius:3px;
-                      border:1px solid rgba(0,255,65,0.3);
+                      border:1px solid {theme['panel_border']};
                     "></div>
-                    <span style="font-size:0.72em; color:#888; white-space:nowrap;">High</span>
+                    <span style="font-size:0.72em; color:{theme['muted']}; white-space:nowrap;">{high_label}</span>
                   </div>
-                  <div style="text-align:center; font-size:0.7em; color:#666;
+                  <div style="text-align:center; font-size:0.7em; color:{theme['muted']};
                               margin-bottom:8px;">{metric_label}</div>
                   <!-- Marker size legend -->
-                  <div style="text-align:center; font-size:0.78em; color:#888;">
+                  <div style="text-align:center; font-size:0.78em; color:{theme['muted']};">
                     Marker size&nbsp;&rarr;&nbsp;complaints:&nbsp;&nbsp;{dots_html}
                   </div>
                 </div>
@@ -787,9 +914,9 @@ def main() -> None:
                     y=city_daily[trend_value_col],
                     mode="lines" if trend_chart_style == "Line + complaints" else "lines+markers",
                     name=f"Citywide {trend_metric_label} average",
-                    line={"width": 2, "color": "#00ff41"},
-                    marker={"color": "#00ff41"},
-                    fillcolor="rgba(0, 255, 65, 0.15)",
+                    line={"width": 2, "color": theme["accent"]},
+                    marker={"color": theme["accent"]},
+                    fillcolor=theme["panel_bg"],
                     fill="tozeroy" if trend_chart_style == "Area + complaints" else None,
                 ),
                 secondary_y=False,
@@ -799,8 +926,8 @@ def main() -> None:
                     x=city_daily["date"],
                     y=city_daily["complaint_count"],
                     name="Daily complaints",
-                    marker_color="#4a9a5a",
-                    opacity=0.45,
+                    marker_color=theme["bar_secondary"],
+                    opacity=0.55,
                 ),
                 secondary_y=True,
             )
@@ -808,16 +935,11 @@ def main() -> None:
                 title=f"{trend_metric_label} vs 311 Complaints Over Time",
                 margin={"l": 0, "r": 0, "t": 45, "b": 45},
                 legend={"orientation": "h", "y": 1.04},
-                paper_bgcolor="#0a0a0a",
-                plot_bgcolor="#0a0a0a",
-                font={"color": "#e0e0e0", "family": "monospace"},
-                title_font={"color": "#00ff41"},
-                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
             )
+            style_fig(trend, theme)
             trend.update_yaxes(title_text=trend_value_title, secondary_y=False)
             trend.update_yaxes(title_text="Complaint count", secondary_y=True)
-            st.plotly_chart(trend, use_container_width=True)
+            st.plotly_chart(trend, width="stretch")
 
             calendar_value_lookup = {
                 "PM2.5": ("pm25_mean", "PM2.5 Avg."),
@@ -859,8 +981,7 @@ def main() -> None:
                     calendar_fig = px.imshow(
                         calendar_pivot,
                         aspect="auto",
-                        # Color scheme for calendar heatmap
-                        color_continuous_scale=[[0, "#001a00"], [0.5, "#00aa33"], [1, "#00ff41"]],
+                        color_continuous_scale=theme["sequential"],
                         labels={
                             "x": "Day of week",
                             "y": "Week starting",
@@ -868,14 +989,9 @@ def main() -> None:
                         },
                         title=f"{calendar_metric_label} calendar heatmap ({selected_month})",
                     )
-                    calendar_fig.update_layout(
-                        margin={"l": 0, "r": 0, "t": 45, "b": 0},
-                        paper_bgcolor="#0a0a0a",
-                        plot_bgcolor="#0a0a0a",
-                        font={"color": "#e0e0e0", "family": "monospace"},
-                        title_font={"color": "#00ff41"},
-                    )
-                    st.plotly_chart(calendar_fig, use_container_width=True)
+                    calendar_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+                    style_fig(calendar_fig, theme, axes=False)
+                    st.plotly_chart(calendar_fig, width="stretch")
 
     with tab_neighborhood:
         ranking_value_col = "pm25_mean_period" if trend_metric_label == "PM2.5" else "no2_mean_period"
@@ -895,25 +1011,17 @@ def main() -> None:
                 y="neighborhood",
                 orientation="h",
                 color=ranking_value_col,
-                # Color scheme for neighborhood trends tab
-                color_continuous_scale=[[0, "#001a00"], [0.5, "#00aa33"], [1, "#00ff41"]],
+                color_continuous_scale=theme["sequential"],
                 title=f"Top 15 neighborhoods by {trend_metric_label} in selected period",
                 labels={
                     "neighborhood": "Neighborhood",
                     ranking_value_col: ranking_value_title,
                 },
             )
-            rank_fig.update_layout(
-                yaxis={"categoryorder": "total ascending"},
-                margin={"l": 0, "r": 0, "t": 45, "b": 0},
-                paper_bgcolor="#0a0a0a",
-                plot_bgcolor="#0a0a0a",
-                font={"color": "#e0e0e0", "family": "monospace"},
-                title_font={"color": "#00ff41"},
-                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-                yaxis2={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-            )
-            st.plotly_chart(rank_fig, use_container_width=True)
+            rank_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            style_fig(rank_fig, theme)
+            rank_fig.update_yaxes(categoryorder="total ascending")
+            st.plotly_chart(rank_fig, width="stretch")
 
     with tab_lag:
         with st.expander("About these charts", expanded=False):
@@ -947,20 +1055,13 @@ anticipatory or odor-driven reporting.
                 x="lag_days",
                 y="correlation",
                 color="correlation",
-                color_continuous_scale=[[0, "#550000"], [0.5, "#1a3a1a"], [1, "#00ff41"]],
+                color_continuous_scale=theme["diverging"],
                 range_color=[-1, 1],
                 title="Lead-lag correlation: PM2.5(t) vs Complaints(t+lag)",
             )
-            lag_fig.update_layout(
-                margin={"l": 0, "r": 0, "t": 45, "b": 0},
-                paper_bgcolor="#0a0a0a",
-                plot_bgcolor="#0a0a0a",
-                font={"color": "#e0e0e0", "family": "monospace"},
-                title_font={"color": "#00ff41"},
-                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-            )
-            st.plotly_chart(lag_fig, use_container_width=True)
+            lag_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            style_fig(lag_fig, theme)
+            st.plotly_chart(lag_fig, width="stretch")
 
             valid = lag_df.dropna(subset=["correlation"]).copy()
             if not valid.empty:
@@ -987,21 +1088,21 @@ anticipatory or odor-driven reporting.
                 y="mean_complaints",
                 markers=True,
                 title=spike_title,
+                color_discrete_sequence=[theme["accent"]],
             )
             if not np.isnan(baseline):
-                spike_fig.add_hline(y=baseline, line_dash="dash", line_color="#888888", annotation_text="non-spike baseline", annotation_font_color="#888888")
+                spike_fig.add_hline(
+                    y=baseline,
+                    line_dash="dash",
+                    line_color=theme["muted"],
+                    annotation_text="non-spike baseline",
+                    annotation_font_color=theme["muted"],
+                )
             spike_fig.update_xaxes(dtick=1, title="Days relative to spike day")
             spike_fig.update_yaxes(title="Mean complaints")
-            spike_fig.update_layout(
-                margin={"l": 0, "r": 0, "t": 45, "b": 0},
-                paper_bgcolor="#0a0a0a",
-                plot_bgcolor="#0a0a0a",
-                font={"color": "#e0e0e0", "family": "monospace"},
-                title_font={"color": "#00ff41"},
-                xaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-                yaxis={"gridcolor": "#1a3a1a", "color": "#e0e0e0"},
-            )
-            st.plotly_chart(spike_fig, use_container_width=True)
+            spike_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
+            style_fig(spike_fig, theme)
+            st.plotly_chart(spike_fig, width="stretch")
 
     with tab_quality:
         quality_columns = [
@@ -1009,6 +1110,7 @@ anticipatory or odor-driven reporting.
             "neighborhood_secondary",
             "sensor_count",
             "coverage_source",
+            "pm25_aqi_map_value",
             "pm25_map_value",
             "no2_map_value",
             "complaints_period",
@@ -1016,19 +1118,6 @@ anticipatory or odor-driven reporting.
             "estimated_sensor_count",
             "estimated_nearest_km",
         ]
-        quality_label_lookup = {
-            "neighborhood": "Neighborhood",
-            "neighborhood_secondary": "Neighborhood alias",
-            "sensor_count": "Sensors in neighborhood",
-            "coverage_source": "Coverage source",
-            "pm25_map_value": "PM2.5 average (ug/m3)",
-            "no2_map_value": "NO2 average (ppb)",
-            "complaints_period": "Complaints direct value",
-            "complaints_map_value": "Complaints (period)",
-            "estimated_sensor_count": "Sensors used for estimate",
-            "estimated_nearest_km": "Nearest sensor distance (km)",
-        }
-
         no_coverage = map_metrics[map_metrics["sensor_count"].fillna(0) == 0].copy()
         st.subheader("Neighborhoods without sensor coverage")
         st.caption(
@@ -1036,15 +1125,36 @@ anticipatory or odor-driven reporting.
             "currently uses direct period values, IDW estimates, or remains unavailable."
         )
         st.dataframe(
-            no_coverage[quality_columns].rename(columns=quality_label_lookup).sort_values("Neighborhood"),
-            use_container_width=True,
+            no_coverage[quality_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
+            width="stretch",
             hide_index=True,
         )
 
         st.subheader("Filtered neighborhood metrics")
+        # Curated column set (in order); avoids dumping internal geometry/flags
+        # and keeps the rename collision-free.
+        metrics_columns = [
+            "neighborhood",
+            "neighborhood_secondary",
+            "sensor_count",
+            "coverage_source",
+            "pm25_aqi_map_value",
+            "pm25_map_value",
+            "pm25_mean_period",
+            "pm25_mean_estimated",
+            "no2_map_value",
+            "no2_mean_period",
+            "no2_mean_estimated",
+            "complaints_map_value",
+            "complaints_period",
+            "complaints_estimated",
+            "estimated_sensor_count",
+            "estimated_nearest_km",
+        ]
+        present_metrics_columns = [c for c in metrics_columns if c in map_metrics.columns]
         st.dataframe(
-            map_metrics.rename(columns=quality_label_lookup).sort_values("Neighborhood"),
-            use_container_width=True,
+            map_metrics[present_metrics_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
+            width="stretch",
             hide_index=True,
         )
 
