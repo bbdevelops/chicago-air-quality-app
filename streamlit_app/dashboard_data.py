@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -8,6 +9,133 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from shapely.geometry import shape
+
+# ── EPA Air Quality Index (AQI) ────────────────────────────────────────────
+# US EPA AQI breakpoints as (conc_low, conc_high, aqi_low, aqi_high).
+#
+# PM2.5 uses the **2024-revised** 24-hour breakpoints (effective 2024-05-06;
+# EPA "Final Updates to the AQI for Particulate Matter" fact sheet). The daily
+# ``pm25_mean`` in the pipeline is the correct 24-hour input. The open-ended
+# "225.5+" Hazardous range is implemented as 225.5–325.4 → 301–500 (the AirNow
+# calculator convention); concentrations above 325.4 are capped at AQI 500.
+PM25_AQI_BREAKPOINTS: list[tuple[float, float, int, int]] = [
+    (0.0, 9.0, 0, 50),
+    (9.1, 35.4, 51, 100),
+    (35.5, 55.4, 101, 150),
+    (55.5, 125.4, 151, 200),
+    (125.5, 225.4, 201, 300),
+    (225.5, 325.4, 301, 500),
+]
+
+# NO2 1-hour breakpoints in ppb (unchanged in 2024). NOTE: a valid NO2 sub-index
+# requires the daily *1-hour max*; our ``no2_mean`` is a daily mean, so
+# ``no2_to_aqi`` is INFORMATIONAL ONLY and must be labeled as such in the UI.
+NO2_AQI_BREAKPOINTS: list[tuple[float, float, int, int]] = [
+    (0, 53, 0, 50),
+    (54, 100, 51, 100),
+    (101, 360, 101, 150),
+    (361, 649, 151, 200),
+    (650, 1249, 201, 300),
+    (1250, 2049, 301, 500),
+]
+
+# (aqi_low, aqi_high, label, hex_color, short health guidance). Colors are the
+# official EPA AQI category colors (green → maroon).
+AQI_CATEGORIES: list[tuple[int, int, str, str, str]] = [
+    (0, 50, "Good", "#00e400", "Air quality is satisfactory; little or no risk."),
+    (51, 100, "Moderate", "#ffff00", "Acceptable; unusually sensitive people should consider limiting prolonged outdoor exertion."),
+    (101, 150, "Unhealthy for Sensitive Groups", "#ff7e00", "Sensitive groups should limit prolonged outdoor exertion."),
+    (151, 200, "Unhealthy", "#ff0000", "Everyone may begin to feel effects; sensitive groups feel stronger effects."),
+    (201, 300, "Very Unhealthy", "#8f3f97", "Health alert: everyone may experience more serious health effects."),
+    (301, 500, "Hazardous", "#7e0023", "Health warning of emergency conditions; everyone should avoid outdoor exertion."),
+]
+
+_AQI_UNAVAILABLE = ("Unavailable", "#666666", "No reading available for this selection.")
+
+
+def _conc_to_aqi(
+    concentration: float,
+    breakpoints: list[tuple[float, float, int, int]],
+    trunc_decimals: int,
+) -> float:
+    """Piecewise-linear AQI from a pollutant concentration. NaN in → NaN out."""
+    if concentration is None:
+        return float("nan")
+    try:
+        conc = float(concentration)
+    except (TypeError, ValueError):
+        return float("nan")
+    if math.isnan(conc) or conc < 0:
+        return float("nan")
+
+    # EPA truncates the concentration before applying the formula.
+    factor = 10 ** trunc_decimals
+    conc = math.floor(conc * factor) / factor
+
+    for c_lo, c_hi, i_lo, i_hi in breakpoints:
+        if conc <= c_hi:
+            aqi = (i_hi - i_lo) / (c_hi - c_lo) * (conc - c_lo) + i_lo
+            return float(round(aqi))
+    # Above the highest breakpoint: cap at the top of the scale.
+    return float(breakpoints[-1][3])
+
+
+def pm25_to_aqi(concentration: float) -> float:
+    """US EPA AQI (2024 breakpoints) from a 24-hour mean PM2.5 in µg/m³."""
+    return _conc_to_aqi(concentration, PM25_AQI_BREAKPOINTS, trunc_decimals=1)
+
+
+def no2_to_aqi(concentration_ppb: float) -> float:
+    """INFORMATIONAL NO2 sub-index from ppb.
+
+    EPA's official NO2 sub-index needs the daily 1-hour maximum; the pipeline
+    only carries a daily mean, so treat this as a rough indicator, never as an
+    official AQI. Callers must label it accordingly.
+    """
+    return _conc_to_aqi(concentration_ppb, NO2_AQI_BREAKPOINTS, trunc_decimals=0)
+
+
+def aqi_category(aqi: float) -> tuple[str, str]:
+    """Return the (label, hex_color) for an AQI value; ('Unavailable', grey) for NaN."""
+    if aqi is None or (isinstance(aqi, float) and math.isnan(aqi)):
+        return _AQI_UNAVAILABLE[0], _AQI_UNAVAILABLE[1]
+    value = float(aqi)
+    for _i_lo, i_hi, label, color, _ in AQI_CATEGORIES:
+        if value <= i_hi:
+            return label, color
+    last = AQI_CATEGORIES[-1]
+    return last[2], last[3]
+
+
+def aqi_health_message(aqi: float) -> str:
+    """Return the short health-guidance string for an AQI value."""
+    if aqi is None or (isinstance(aqi, float) and math.isnan(aqi)):
+        return _AQI_UNAVAILABLE[2]
+    value = float(aqi)
+    for _i_lo, i_hi, _, _, message in AQI_CATEGORIES:
+        if value <= i_hi:
+            return message
+    return AQI_CATEGORIES[-1][4]
+
+
+def add_aqi_columns(df: pd.DataFrame, pm25_col: str = "pm25_mean") -> pd.DataFrame:
+    """Add ``pm25_aqi`` / ``aqi_category`` / ``aqi_color`` columns from a PM2.5 column.
+
+    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI and the
+    'Unavailable' category. Returns a copy; input is not mutated.
+    """
+    out = df.copy()
+    if pm25_col not in out.columns:
+        out["pm25_aqi"] = np.nan
+        out["aqi_category"] = _AQI_UNAVAILABLE[0]
+        out["aqi_color"] = _AQI_UNAVAILABLE[1]
+        return out
+
+    out["pm25_aqi"] = pd.to_numeric(out[pm25_col], errors="coerce").map(pm25_to_aqi)
+    categories = out["pm25_aqi"].map(aqi_category)
+    out["aqi_category"] = categories.map(lambda pair: pair[0])
+    out["aqi_color"] = categories.map(lambda pair: pair[1])
+    return out
 
 
 @dataclass(frozen=True)
@@ -296,6 +424,7 @@ def enrich_neighborhood_metrics_with_estimates(
         estimate_targets.index.to_list(),
         estimate_targets["centroid_lat"].to_list(),
         estimate_targets["centroid_lon"].to_list(),
+        strict=True,
     ):
         if pd.isna(centroid_lat) or pd.isna(centroid_lon):
             continue
@@ -409,43 +538,51 @@ def compute_spike_concordance(
     city_daily: pd.DataFrame,
     spike_percentile: float = 0.80,
     window_days: int = 2,
+    threshold: float | None = None,
 ) -> tuple[pd.DataFrame, float]:
     """Summarize complaint activity around city-level PM2.5 spike days.
 
-    A spike day is any day where city-wide average PM2.5 is at or above the
-    ``spike_percentile`` quantile of the selected date range.  Using a
-    percentile (rather than a fixed threshold) guarantees spike days are always
-    present regardless of the absolute pollution level in the selected window.
+    A spike day is any day where city-wide average PM2.5 is at or above a
+    threshold. The threshold is either:
+
+    * an absolute ``threshold`` (µg/m³) when provided — e.g. the EPA 24-hour
+      PM2.5 standard of 35 — which anchors spikes to a health-meaningful level; or
+    * the ``spike_percentile`` quantile of PM2.5 over the selected range
+      (default) — which guarantees spike days exist regardless of the absolute
+      pollution level in the window.
+
+    Returns ``(offsets_frame, baseline)`` where ``baseline`` is the mean
+    complaint count on non-spike days.
     """
+    empty = pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"])
     if city_daily.empty:
-        return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
+        return empty, float("nan")
 
     city = city_daily.sort_values("date").copy()
     pm25_valid = city["pm25_mean"].dropna()
     if pm25_valid.empty:
-        return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
+        return empty, float("nan")
 
-    threshold = float(pm25_valid.quantile(spike_percentile))
-    city["is_spike"] = city["pm25_mean"] >= threshold
+    spike_level = float(threshold) if threshold is not None else float(pm25_valid.quantile(spike_percentile))
+    city["is_spike"] = city["pm25_mean"] >= spike_level
 
     spike_dates = city.loc[city["is_spike"], "date"]
     baseline = city.loc[~city["is_spike"], "complaint_count"].mean()
 
+    # Vectorized offset join: look complaint counts up by date rather than
+    # scanning the frame once per (offset, spike-day) pair.
+    complaints_by_date = city.set_index("date")["complaint_count"]
+
     rows = []
     for offset in range(-window_days, window_days + 1):
-        vals = []
-        for spike_date in spike_dates:
-            d = spike_date + pd.Timedelta(days=offset)
-            match_rows = city.loc[city["date"] == d]
-            if not match_rows.empty:
-                vals.append(float(match_rows["complaint_count"].iloc[0]))
-
-        if vals:
+        target_dates = spike_dates + pd.Timedelta(days=offset)
+        matched = complaints_by_date.reindex(target_dates).dropna()
+        if not matched.empty:
             rows.append(
                 {
                     "offset_day": offset,
-                    "mean_complaints": sum(vals) / len(vals),
-                    "total_complaints": sum(vals),
+                    "mean_complaints": float(matched.mean()),
+                    "total_complaints": float(matched.sum()),
                 }
             )
         else:
