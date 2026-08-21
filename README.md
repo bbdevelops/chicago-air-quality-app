@@ -83,6 +83,12 @@ For notebooks only (optional):
 pip install -r requirements-notebooks.txt
 ```
 
+For development / CI tooling (ruff, pre-commit, nbstripout):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ### 2. Configure API tokens
 
 Create `.env` from the template in the project root:
@@ -198,6 +204,9 @@ Unit tests are under `tests/` and target core pipeline and analytics logic:
 - hourly-to-daily weighted re-aggregation logic
 - Streamlit analytics functions (filters, aggregations, lag metrics, spike windows)
 - neighborhood IDW estimation logic and unavailable-fallback behavior
+- EPA AQI conversion + category/health helpers (`pm25_to_aqi`, `aqi_category`, `add_aqi_columns`)
+- spike-window concordance (vectorized; percentile or absolute threshold)
+- EPA AQS reference cleaner (`clean_epa_frame`)
 
 Run tests:
 
@@ -225,6 +234,11 @@ Detailed testing guide (including manual false-positive checks):
 | 8 | Neighborhood summary | `build_neighborhood_summary.py` | Aggregate stats per neighborhood |
 | 9 | Load SQLite | `load_sqlite.py` | Write 3 tables to SQLite database |
 
+Running with `--with-epa` inserts two **optional** steps: `extract_epa.py` (pull
+EPA AQS reference monitors for Cook County) and `clean_epa.py` (→
+`data/clean/epa_reference_daily.csv`). These are skipped by default, so a missing
+EPA key or AQS outage never breaks the core pipeline.
+
 ---
 
 ## Key Output Files
@@ -251,6 +265,12 @@ One row per neighborhood (all 98), with:
 - Total complaint counts
 - Spike day counts
 
+### `epa_reference_daily.csv` (optional, `--with-epa`)
+One row per EPA regulatory reference site per day (Cook County):
+- `site_id`, `date`, `site_name`, `latitude`, `longitude`
+- `pm25_mean` / `pm25_aqi` — daily mean PM2.5 and EPA's reported AQI
+- `no2_mean` / `no2_aqi` — daily mean NO2 and AQI (NO2 present only at NO2 sites)
+
 ---
 
 ## Removed / Deferred Components
@@ -259,7 +279,7 @@ The following were planned but removed as non-functional stubs:
 
 | Component | Reason | Status |
 |-----------|--------|--------|
-| EPA AirNow integration | API key required, extraction never implemented | **Removed** — Open Air data covers PM2.5/NO2 sufficiently |
+| EPA AirNow (real-time) integration | AirNow API stub, extraction never implemented | **Removed** — superseded by the EPA **AQS** integration below (regulatory monitors), added as an optional reference source (`--with-epa`; see [Data Sources](#data-sources)) |
 | Visual Crossing weather | API stub only, no downstream usage | **Removed** — can be re-added if weather correlation is needed |
 | Census data cleaning | Stub only, no downstream usage | **Removed** — can be re-added for demographic analysis |
 

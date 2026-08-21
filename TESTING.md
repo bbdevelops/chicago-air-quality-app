@@ -16,9 +16,14 @@ The suite currently covers:
   - `assign_neighborhood` (exact and snap-fallback behavior)
 - `scripts/aggregate_hourly_to_daily.py`
   - `weighted_reaggregate_daily`
+- `scripts/clean_epa.py`
+  - `clean_epa_frame` (collapses raw AQS daily rows to one PM2.5/NO2 row per site/day)
 - `streamlit_app/dashboard_data.py`
   - filtering, city/day aggregation, neighborhood-preserving joins,
-    lag correlations, and spike-window summaries
+    lag correlations, and spike-window summaries (vectorized; percentile or
+    absolute threshold)
+  - EPA AQI helpers: `pm25_to_aqi`, `no2_to_aqi`, `aqi_category`,
+    `aqi_health_message`, `add_aqi_columns`
 
 ## Run Tests
 
@@ -44,6 +49,13 @@ Run one test:
 
 ```bash
 pytest tests/test_assign_neighborhoods.py::test_assign_neighborhood_snaps_to_nearest_boundary
+```
+
+Lint (matches CI). Install the dev tooling once, then run ruff:
+
+```bash
+pip install -r requirements-dev.txt
+ruff check .
 ```
 
 ## Test Design Notes
@@ -93,18 +105,22 @@ Use the checks below periodically to ensure tests fail when logic is wrong
   tolerance or geometry parsing edits.
 - `test_aggregate_hourly_to_daily.py` failures indicate chunk re-aggregation logic regressions.
 - `test_dashboard_data.py` failures indicate mismatch between app metrics and pipeline semantics.
+- `test_clean_epa.py` failures indicate EPA AQS parsing/collapse regressions (e.g. site-id
+  formatting or per-site/day aggregation).
 
-## CI Recommendation
+## Continuous Integration
 
-If you add CI later, run this command in pull requests:
+CI is configured in `.github/workflows/ci.yml` and runs on pushes and pull requests:
 
 ```bash
+ruff check .
 pytest
 ```
 
-Optional stricter gate:
+Optional stricter local gate (also exercises the pipeline end-to-end):
 
 ```bash
 python run_pipeline.py --skip-api
+ruff check .
 pytest
 ```

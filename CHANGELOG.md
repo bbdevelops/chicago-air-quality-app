@@ -15,17 +15,16 @@
 - `compute_spike_concordance` is **vectorized** (was an O(offsets × spike-days) nested scan) and now accepts an absolute `threshold` in addition to the percentile.
 - All charts route background/font/grid styling through `theme.style_fig`; colorscales follow the active theme.
 - Migrated deprecated `use_container_width=True` → `width="stretch"`.
+- Consolidated duplicated map/QA column-label dictionaries into a single module-level `COLUMN_LABELS` constant in `streamlit_app/app.py`.
+- `.streamlit/config.toml`: set `enableCORS = false` so `enableXsrfProtection` stays effective (the two conflict).
 
 ### Tooling & Notebooks
 - **CI**: added `.github/workflows/ci.yml` running `ruff` + `pytest` on pushes/PRs.
 - **Tooling config**: added `pyproject.toml` (ruff + pytest config, project metadata), `requirements-dev.txt`, `.python-version` (3.13), and `.pre-commit-config.yaml` (ruff + nbstripout); removed the now-redundant `pytest.ini`.
 - **Notebooks**: stripped committed cell outputs from `eda.ipynb` (1.05 MB → 30 KB), fixed duplicated Section 5/6 headers (now 1–9), corrected a `4a`→`6a` comment, and renamed the stale "Citizen Sensor Tracker" title.
 
-### Changed
-- Consolidated duplicated map/QA column-label dictionaries into a single module-level `COLUMN_LABELS` constant in `streamlit_app/app.py`.
-- `.streamlit/config.toml`: set `enableCORS = false` so `enableXsrfProtection` stays effective (the two conflict).
-
 ### Fixed
+- **Accessible theme rendered Material Symbols icons as raw text**: the chrome CSS applied `font-family` to all `<span>` elements, overriding Streamlit's Material Symbols font on icon spans, so the sidebar `>>` collapse control and expander chevrons showed ligature text (`keyboard_double_arrow_right`, `arrow_right`) and overlapped nearby text. The chrome CSS is now scoped to leave icon fonts untouched.
 - `page_icon` now uses the `:wind_face:` shortcode (previously rendered as literal text).
 - Removed stray colorbar border typo (`colorbar_borderwidth=.11` → `1`) and a copy-pasted `yaxis2` grid style on the single-axis ranking chart.
 - Deleted orphan/backup data artifacts (`merged_complaints_air_backup.csv`, old Tableau `neighborhood - avg *.csv` exports) and a stale editor lock file.
