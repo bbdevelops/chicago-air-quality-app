@@ -96,10 +96,18 @@ def no2_to_aqi(concentration_ppb: float) -> float:
 
 
 def aqi_category(aqi: float) -> tuple[str, str]:
-    """Return the (label, hex_color) for an AQI value; ('Unavailable', grey) for NaN."""
-    if aqi is None or (isinstance(aqi, float) and math.isnan(aqi)):
+    """Return the (label, hex_color) for an AQI value; ('Unavailable', grey) for NaN.
+
+    Converts to float first so NumPy scalars (e.g. numpy.float64('nan')) and other
+    numeric-like inputs are handled correctly; non-numeric inputs are treated as
+    unavailable rather than misclassified.
+    """
+    try:
+        value = float(aqi)
+    except (TypeError, ValueError):
         return _AQI_UNAVAILABLE[0], _AQI_UNAVAILABLE[1]
-    value = float(aqi)
+    if math.isnan(value):
+        return _AQI_UNAVAILABLE[0], _AQI_UNAVAILABLE[1]
     for _i_lo, i_hi, label, color, _ in AQI_CATEGORIES:
         if value <= i_hi:
             return label, color
@@ -108,10 +116,17 @@ def aqi_category(aqi: float) -> tuple[str, str]:
 
 
 def aqi_health_message(aqi: float) -> str:
-    """Return the short health-guidance string for an AQI value."""
-    if aqi is None or (isinstance(aqi, float) and math.isnan(aqi)):
+    """Return the short health-guidance string for an AQI value.
+
+    Uses the same float-first NaN handling as ``aqi_category`` so NumPy scalars and
+    non-numeric inputs are treated as unavailable rather than misclassified.
+    """
+    try:
+        value = float(aqi)
+    except (TypeError, ValueError):
         return _AQI_UNAVAILABLE[2]
-    value = float(aqi)
+    if math.isnan(value):
+        return _AQI_UNAVAILABLE[2]
     for _i_lo, i_hi, _, _, message in AQI_CATEGORIES:
         if value <= i_hi:
             return message

@@ -263,6 +263,19 @@ def test_aqi_helpers_handle_nan_and_negatives() -> None:
     assert "Unavailable".lower() not in aqi_health_message(75).lower()
 
 
+def test_aqi_helpers_treat_numpy_nan_and_non_numeric_as_unavailable() -> None:
+    import numpy as np
+
+    # NumPy scalar NaN must be Unavailable, not misclassified as Hazardous.
+    assert aqi_category(np.float64("nan"))[0] == "Unavailable"
+    assert aqi_health_message(np.float64("nan")) == aqi_health_message(float("nan"))
+    # A valid NumPy scalar still classifies normally.
+    assert aqi_category(np.float64(25.0))[0] == "Good"
+    # None / non-numeric inputs are Unavailable rather than raising or misclassifying.
+    assert aqi_category(None)[0] == "Unavailable"
+    assert aqi_category("n/a")[0] == "Unavailable"
+
+
 def test_aqi_category_and_message_bands() -> None:
     assert aqi_category(25)[0] == "Good"
     assert aqi_category(75)[0] == "Moderate"

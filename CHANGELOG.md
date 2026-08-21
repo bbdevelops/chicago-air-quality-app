@@ -14,7 +14,6 @@
 ### Changed
 - `compute_spike_concordance` is **vectorized** (was an O(offsets × spike-days) nested scan) and now accepts an absolute `threshold` in addition to the percentile.
 - All charts route background/font/grid styling through `theme.style_fig`; colorscales follow the active theme.
-- Migrated deprecated `use_container_width=True` → `width="stretch"`.
 - Consolidated duplicated map/QA column-label dictionaries into a single module-level `COLUMN_LABELS` constant in `streamlit_app/app.py`.
 - `.streamlit/config.toml`: set `enableCORS = false` so `enableXsrfProtection` stays effective (the two conflict).
 

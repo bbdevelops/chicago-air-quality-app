@@ -825,7 +825,7 @@ def main() -> None:
         )
         st.plotly_chart(
             fig,
-            width="stretch",
+            use_container_width=True,
             config={
                 "scrollZoom": True,
                 "displaylogo": False,
@@ -939,7 +939,7 @@ def main() -> None:
             style_fig(trend, theme)
             trend.update_yaxes(title_text=trend_value_title, secondary_y=False)
             trend.update_yaxes(title_text="Complaint count", secondary_y=True)
-            st.plotly_chart(trend, width="stretch")
+            st.plotly_chart(trend, use_container_width=True)
 
             calendar_value_lookup = {
                 "PM2.5": ("pm25_mean", "PM2.5 Avg."),
@@ -991,7 +991,7 @@ def main() -> None:
                     )
                     calendar_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
                     style_fig(calendar_fig, theme, axes=False)
-                    st.plotly_chart(calendar_fig, width="stretch")
+                    st.plotly_chart(calendar_fig, use_container_width=True)
 
     with tab_neighborhood:
         ranking_value_col = "pm25_mean_period" if trend_metric_label == "PM2.5" else "no2_mean_period"
@@ -1021,7 +1021,7 @@ def main() -> None:
             rank_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
             style_fig(rank_fig, theme)
             rank_fig.update_yaxes(categoryorder="total ascending")
-            st.plotly_chart(rank_fig, width="stretch")
+            st.plotly_chart(rank_fig, use_container_width=True)
 
     with tab_lag:
         with st.expander("About these charts", expanded=False):
@@ -1061,7 +1061,7 @@ anticipatory or odor-driven reporting.
             )
             lag_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
             style_fig(lag_fig, theme)
-            st.plotly_chart(lag_fig, width="stretch")
+            st.plotly_chart(lag_fig, use_container_width=True)
 
             valid = lag_df.dropna(subset=["correlation"]).copy()
             if not valid.empty:
@@ -1102,7 +1102,7 @@ anticipatory or odor-driven reporting.
             spike_fig.update_yaxes(title="Mean complaints")
             spike_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
             style_fig(spike_fig, theme)
-            st.plotly_chart(spike_fig, width="stretch")
+            st.plotly_chart(spike_fig, use_container_width=True)
 
     with tab_quality:
         quality_columns = [
@@ -1126,7 +1126,7 @@ anticipatory or odor-driven reporting.
         )
         st.dataframe(
             no_coverage[quality_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
@@ -1154,7 +1154,7 @@ anticipatory or odor-driven reporting.
         present_metrics_columns = [c for c in metrics_columns if c in map_metrics.columns]
         st.dataframe(
             map_metrics[present_metrics_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
-            width="stretch",
+            use_container_width=True,
             hide_index=True,
         )
 
