@@ -261,6 +261,9 @@ def test_aqi_helpers_handle_nan_and_negatives() -> None:
     assert label == "Unavailable"
     assert color.startswith("#")
     assert "Unavailable".lower() not in aqi_health_message(75).lower()
+    # Out-of-range negatives are Unavailable, not misclassified as "Good".
+    assert aqi_category(-1)[0] == "Unavailable"
+    assert aqi_health_message(-1) == aqi_health_message(float("nan"))
 
 
 def test_aqi_helpers_treat_numpy_nan_and_non_numeric_as_unavailable() -> None:

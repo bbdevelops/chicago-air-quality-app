@@ -131,12 +131,17 @@ def chrome_css(theme: dict[str, Any]) -> str:
     Only emitted for the non-default (Accessible) theme, since config.toml
     already paints the default dark chrome.
 
-    IMPORTANT: ``font-family`` is deliberately NOT applied to bare ``<span>``.
+    IMPORTANT — how the font is applied without breaking icons:
     Streamlit renders Material Symbols icons (the sidebar ``>>`` collapse control,
     expander chevrons) as ``<span>`` ligatures backed by the "Material Symbols
-    Rounded" font. Overriding their font turns the glyph into raw ligature text
-    like ``keyboard_double_arrow_right`` / ``arrow_right``, which also overlaps
-    nearby text. Color is safe to set broadly (icons render in ``currentColor``).
+    Rounded" font. ``font-family`` here is set on ``.stApp`` and text containers so
+    text spans *inherit* the theme font, but it is never set as a direct rule on a
+    bare ``<span>`` selector — a direct span rule would beat the icon spans' own
+    font rule and turn the glyph into raw ligature text (``keyboard_double_arrow_right``
+    / ``arrow_right``) that overlaps nearby text. Icon spans keep their own direct
+    font rule (which wins over the inherited ``.stApp`` value), and are additionally
+    force-restored below as a safeguard. Color is safe to set broadly (icons render
+    in ``currentColor``).
     """
     return f"""
     <style>

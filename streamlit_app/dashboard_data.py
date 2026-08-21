@@ -106,7 +106,8 @@ def aqi_category(aqi: float) -> tuple[str, str]:
         value = float(aqi)
     except (TypeError, ValueError):
         return _AQI_UNAVAILABLE[0], _AQI_UNAVAILABLE[1]
-    if math.isnan(value):
+    # AQI is defined on 0–500; NaN or out-of-range negatives are unavailable.
+    if math.isnan(value) or value < 0:
         return _AQI_UNAVAILABLE[0], _AQI_UNAVAILABLE[1]
     for _i_lo, i_hi, label, color, _ in AQI_CATEGORIES:
         if value <= i_hi:
@@ -125,7 +126,8 @@ def aqi_health_message(aqi: float) -> str:
         value = float(aqi)
     except (TypeError, ValueError):
         return _AQI_UNAVAILABLE[2]
-    if math.isnan(value):
+    # AQI is defined on 0–500; NaN or out-of-range negatives are unavailable.
+    if math.isnan(value) or value < 0:
         return _AQI_UNAVAILABLE[2]
     for _i_lo, i_hi, _, _, message in AQI_CATEGORIES:
         if value <= i_hi:
