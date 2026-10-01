@@ -16,8 +16,6 @@ db/*.db
 
 # --- Pipeline data files (generated or too large for version control) ---
 data/raw/*.csv
-data/clean/*.csv
-data/clean/*.geojson
 
 # --- Original source data (large files, not suitable for git) ---
 Data Sets/
