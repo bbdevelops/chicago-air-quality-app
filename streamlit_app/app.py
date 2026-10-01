@@ -22,8 +22,7 @@ try:
         compute_lag_correlations,
         compute_spike_concordance,
         enrich_neighborhood_metrics_with_estimates,
-        filter_complaint_points,
-        filter_merged_data,
+        filter_by_date_range,
         load_pipeline_data,
         pm25_to_aqi,
     )
@@ -47,8 +46,7 @@ except ModuleNotFoundError:
         compute_lag_correlations,
         compute_spike_concordance,
         enrich_neighborhood_metrics_with_estimates,
-        filter_complaint_points,
-        filter_merged_data,
+        filter_by_date_range,
         load_pipeline_data,
         pm25_to_aqi,
     )
@@ -80,12 +78,12 @@ COLUMN_LABELS = {
     "coverage_source": "Coverage source",
     "sensor_count": "Sensors in neighborhood",
     "pm25_aqi_map_value": "Air Quality Index (PM2.5)",
-    "pm25_map_value": "PM2.5 average (ug/m3)",
-    "pm25_mean_period": "PM2.5 direct value (ug/m3)",
-    "pm25_mean_estimated": "PM2.5 IDW estimate (ug/m3)",
-    "no2_map_value": "NO2 average (ppb)",
-    "no2_mean_period": "NO2 direct value (ppb)",
-    "no2_mean_estimated": "NO2 IDW estimate (ppb)",
+    "pm25_map_value": "PM2.5 average (µg/m³)",
+    "pm25_mean_period": "PM2.5 direct value (µg/m³)",
+    "pm25_mean_estimated": "PM2.5 IDW estimate (µg/m³)",
+    "no2_map_value": "NO2 average (µg/m³)",
+    "no2_mean_period": "NO2 direct value (µg/m³)",
+    "no2_mean_estimated": "NO2 IDW estimate (µg/m³)",
     "complaints_map_value": "Complaints (period)",
     "complaints_period": "Complaints direct value",
     "complaints_estimated": "Complaints IDW estimate",
@@ -98,11 +96,42 @@ COLUMN_LABELS = {
 # columns (e.g. total_complaints ↔ complaints_map_value) and would collide if
 # used to rename the neighborhood table.
 HOVER_EXTRA_LABELS = {
-    "pm25_mean": "PM2.5 average (ug/m3)",
-    "no2_mean": "NO2 average (ppb)",
+    "pm25_mean": "PM2.5 average (µg/m³)",
+    "no2_mean": "NO2 average (µg/m³)",
     "total_complaints": "Complaints (period)",
     "active_days": "Active sensor days",
 }
+
+from dataclasses import dataclass
+
+@dataclass
+class MapMetric:
+    choropleth_col: str
+    heatmap_col: str
+    colorbar_title: str
+    is_aqi: bool
+
+MAP_METRICS = {
+    "Air Quality Index (PM2.5)": MapMetric("pm25_aqi_map_value", "pm25_aqi", "AQI", True),
+    "PM2.5 mean (selected period)": MapMetric("pm25_map_value", "pm25_mean", "PM2.5 Avg.", False),
+    "NO2 mean (selected period)": MapMetric("no2_map_value", "no2_mean", "NO2 Avg.", False),
+    "Complaints (selected period)": MapMetric("complaints_map_value", "total_complaints", "Complaints", False),
+    "Sensor coverage (all-time)": MapMetric("sensor_count", "active_days", "Sensors", False),
+}
+
+@dataclass
+class PolConfig:
+    column: str
+    label: str
+    unit: str
+
+POLLUTANTS = {
+    "PM2.5": PolConfig(column="pm25_mean", label="PM2.5", unit="µg/m³"),
+    "NO2": PolConfig(column="no2_mean", label="NO2", unit="µg/m³"),
+}
+
+CHICAGO_CENTER = {"lat": 41.8781, "lon": -87.6298}
+CHICAGO_ZOOM = 9
 
 
 @st.cache_data(show_spinner=False)
@@ -534,18 +563,18 @@ def main() -> None:
     if theme["name"] != "Terminal":
         st.markdown(chrome_css(theme), unsafe_allow_html=True)
 
-    filtered = filter_merged_data(
-        merged=merged,
+    filtered = filter_by_date_range(
+        df=merged,
         start_date=pd.Timestamp(start_date),
         end_date=pd.Timestamp(end_date),
         neighborhoods=selected_neighborhoods,
     )
-    complaint_points = filter_complaint_points(
-        complaints=data.complaints,
+    complaint_points = filter_by_date_range(
+        df=data.complaints,
         start_date=pd.Timestamp(start_date),
         end_date=pd.Timestamp(end_date),
         neighborhoods=selected_neighborhoods,
-    )
+    ).dropna(subset=["latitude", "longitude"])
 
     base_map_metrics = build_neighborhood_metrics(summary, filtered)
     if selected_neighborhoods:
@@ -593,24 +622,27 @@ def main() -> None:
     selected_days = int((pd.Timestamp(end_date) - pd.Timestamp(start_date)).days) + 1
     prev_end = pd.Timestamp(start_date) - pd.Timedelta(days=1)
     prev_start = prev_end - pd.Timedelta(days=max(selected_days - 1, 0))
-    previous_filtered = filter_merged_data(
-        merged=merged,
+    previous_filtered = filter_by_date_range(
+        df=merged,
         start_date=prev_start,
         end_date=prev_end,
         neighborhoods=selected_neighborhoods,
     )
 
-    current_pm25 = float(filtered["pm25_mean"].mean()) if not filtered.empty else float("nan")
-    previous_pm25 = float(previous_filtered["pm25_mean"].mean()) if not previous_filtered.empty else float("nan")
+    def _safe_metric(df_sub: pd.DataFrame, col: str, agg: str, fill_val: float | int) -> float | int:
+        if df_sub.empty:
+            return fill_val
+        val = getattr(df_sub[col], agg)()
+        return float(val) if isinstance(fill_val, float) else int(val)
 
-    current_no2 = float(filtered["no2_mean"].mean()) if not filtered.empty else float("nan")
-    previous_no2 = float(previous_filtered["no2_mean"].mean()) if not previous_filtered.empty else float("nan")
-
-    current_complaints = int(filtered["complaint_count"].sum()) if not filtered.empty else 0
-    previous_complaints = int(previous_filtered["complaint_count"].sum()) if not previous_filtered.empty else 0
-
-    current_sensors = int(filtered["sensor_name"].nunique()) if not filtered.empty else 0
-    previous_sensors = int(previous_filtered["sensor_name"].nunique()) if not previous_filtered.empty else 0
+    current_pm25 = _safe_metric(filtered, "pm25_mean", "mean", float("nan"))
+    previous_pm25 = _safe_metric(previous_filtered, "pm25_mean", "mean", float("nan"))
+    current_no2 = _safe_metric(filtered, "no2_mean", "mean", float("nan"))
+    previous_no2 = _safe_metric(previous_filtered, "no2_mean", "mean", float("nan"))
+    current_complaints = _safe_metric(filtered, "complaint_count", "sum", 0)
+    previous_complaints = _safe_metric(previous_filtered, "complaint_count", "sum", 0)
+    current_sensors = _safe_metric(filtered, "sensor_name", "nunique", 0)
+    previous_sensors = _safe_metric(previous_filtered, "sensor_name", "nunique", 0)
 
     # ── AQI hero banner ────────────────────────────────────────────────────
     # Translate the selection-average PM2.5 into the public-facing EPA AQI so the
@@ -620,7 +652,7 @@ def main() -> None:
     aqi_message = aqi_health_message(current_aqi)
     aqi_value_text = f"{current_aqi:.0f}" if not np.isnan(current_aqi) else "n/a"
     # Dark text on the light-yellow/green bands, white elsewhere, for contrast.
-    text_color = "#1a1a1a" if aqi_label in ("Good", "Moderate") else "#ffffff"
+    text_color = "#1a1a1a" if not np.isnan(current_aqi) and current_aqi <= 100 else "#ffffff"
     st.markdown(
         f"""
         <div style="background:{aqi_color}; border-radius:10px; padding:14px 18px;
@@ -670,36 +702,13 @@ def main() -> None:
     )
 
     with tab_map:
-        colorbar_title_lookup = {
-            "Air Quality Index (PM2.5)": "AQI",
-            "PM2.5 mean (selected period)": "PM2.5 Avg.",
-            "NO2 mean (selected period)": "NO2 Avg.",
-            "Complaints (selected period)": "Complaints",
-            "Sensor coverage (all-time)": "Sensors",
-        }
+        metric_cfg = MAP_METRICS[map_metric_label]
 
-        choropleth_metric_lookup = {
-            "Air Quality Index (PM2.5)": "pm25_aqi_map_value",
-            "PM2.5 mean (selected period)": "pm25_map_value",
-            "NO2 mean (selected period)": "no2_map_value",
-            "Complaints (selected period)": "complaints_map_value",
-            "Sensor coverage (all-time)": "sensor_count",
-        }
-
-        heatmap_metric_lookup = {
-            "Air Quality Index (PM2.5)": "pm25_aqi",
-            "PM2.5 mean (selected period)": "pm25_mean",
-            "NO2 mean (selected period)": "no2_mean",
-            "Complaints (selected period)": "total_complaints",
-            "Sensor coverage (all-time)": "active_days",
-        }
-
-        is_aqi_metric = map_metric_label == "Air Quality Index (PM2.5)"
         # AQI uses the fixed EPA band scale over 0–500 so colors are absolute;
         # other metrics use the active theme's sequential/density ramp.
-        choropleth_scale = AQI_COLORSCALE if is_aqi_metric else theme["sequential"]
-        density_scale = AQI_COLORSCALE if is_aqi_metric else theme["density"]
-        metric_range = list(AQI_RANGE) if is_aqi_metric else None
+        choropleth_scale = AQI_COLORSCALE if metric_cfg.is_aqi else theme["sequential"]
+        density_scale = AQI_COLORSCALE if metric_cfg.is_aqi else theme["density"]
+        metric_range = list(AQI_RANGE) if metric_cfg.is_aqi else None
 
         if map_mode == "Neighborhood choropleth":
             st.caption(
@@ -707,13 +716,12 @@ def main() -> None:
                 f"from nearby sensors (k={idw_k}, max distance={idw_max_km} km)."
             )
 
-            color_col = choropleth_metric_lookup[map_metric_label]
             fig = px.choropleth_map(
                 map_metrics,
                 geojson=data.neighborhoods_geojson,
                 locations="neighborhood",
                 featureidkey="properties.neighborhood",
-                color=color_col,
+                color=metric_cfg.choropleth_col,
                 hover_name="neighborhood",
                 hover_data={
                     "neighborhood_secondary": True,
@@ -735,12 +743,12 @@ def main() -> None:
                 color_continuous_scale=choropleth_scale,
                 range_color=metric_range,
                 map_style=theme["map_style"],
-                center={"lat": 41.8781, "lon": -87.6298},
-                zoom=9,
+                center=CHICAGO_CENTER,
+                zoom=CHICAGO_ZOOM,
                 opacity=0.58,
             )
         else:
-            heat_col = heatmap_metric_lookup[map_metric_label]
+            heat_col = metric_cfg.heatmap_col
             heat_points = sensors.dropna(subset=["lat", "lon", heat_col]).copy()
 
             if heat_points.empty:
@@ -749,8 +757,8 @@ def main() -> None:
                 fig.update_layout(
                     map={
                         "style": theme["map_style"],
-                        "center": {"lat": 41.8781, "lon": -87.6298},
-                        "zoom": 9,
+                        "center": CHICAGO_CENTER,
+                        "zoom": CHICAGO_ZOOM,
                     }
                 )
             else:
@@ -772,8 +780,8 @@ def main() -> None:
                     color_continuous_scale=density_scale,
                     range_color=metric_range,
                     map_style=theme["map_style"],
-                    center={"lat": 41.8781, "lon": -87.6298},
-                    zoom=9,
+                    center=CHICAGO_CENTER,
+                    zoom=CHICAGO_ZOOM,
                     title="Continuous sensor density heatmap",
                 )
 
@@ -789,7 +797,7 @@ def main() -> None:
         # Colorbar: vertical floating overlay on the right side (desktop).
         # On mobile the Plotly colorbar is hidden via CSS; a custom HTML bar shows below.
         fig.update_coloraxes(
-            colorbar_title=colorbar_title_lookup[map_metric_label],
+            colorbar_title=metric_cfg.colorbar_title,
             colorbar_thicknessmode="pixels",
             colorbar_thickness=color_scale_width_px,
             colorbar_len=color_scale_height_pct / 100.0,
@@ -806,8 +814,8 @@ def main() -> None:
             colorbar_outlinecolor=theme["panel_border"],
         )
 
+        fig = style_fig(fig, theme, margin={"l": 0, "r": 0, "t": 10, "b": 0})
         fig.update_layout(
-            margin={"l": 0, "r": 0, "t": 10, "b": 0},
             height=map_height_px,
             uirevision="map-view",
             # Legend only shows toggleable layer names (sensor markers, complaints).
@@ -898,8 +906,9 @@ def main() -> None:
         if city_daily.empty:
             st.warning("No rows in selected range.")
         else:
-            trend_value_col = "pm25_mean" if trend_metric_label == "PM2.5" else "no2_mean"
-            trend_value_title = "PM2.5 (ug/m3)" if trend_metric_label == "PM2.5" else "NO2 (ppb)"
+            pol_cfg = POLLUTANTS[trend_metric_label]
+            trend_value_col = pol_cfg.column
+            trend_value_title = f"{pol_cfg.label} ({pol_cfg.unit})"
             missing_days = int(city_daily[trend_value_col].isna().sum())
             if missing_days > 0:
                 st.caption(
@@ -941,12 +950,13 @@ def main() -> None:
             trend.update_yaxes(title_text="Complaint count", secondary_y=True)
             st.plotly_chart(trend, use_container_width=True)
 
-            calendar_value_lookup = {
-                "PM2.5": ("pm25_mean", "PM2.5 Avg."),
-                "NO2": ("no2_mean", "NO2 Avg."),
-                "Complaints": ("complaint_count", "Complaint count"),
-            }
-            calendar_value_col, calendar_title = calendar_value_lookup[calendar_metric_label]
+            if calendar_metric_label in POLLUTANTS:
+                pol_cfg = POLLUTANTS[calendar_metric_label]
+                calendar_value_col = pol_cfg.column
+                calendar_title = f"{pol_cfg.label} Avg."
+            else:
+                calendar_value_col = "complaint_count"
+                calendar_title = "Complaint count"
             monthly_options = sorted(city_daily["date"].dt.to_period("M").astype(str).unique().tolist())
             default_month_idx = max(len(monthly_options) - 1, 0)
             selected_month = st.selectbox(
@@ -994,8 +1004,9 @@ def main() -> None:
                     st.plotly_chart(calendar_fig, use_container_width=True)
 
     with tab_neighborhood:
-        ranking_value_col = "pm25_mean_period" if trend_metric_label == "PM2.5" else "no2_mean_period"
-        ranking_value_title = "PM2.5 average (selected period)" if trend_metric_label == "PM2.5" else "NO2 average (selected period)"
+        pol_cfg = POLLUTANTS[trend_metric_label]
+        ranking_value_col = f"{pol_cfg.column}_period"
+        ranking_value_title = f"{pol_cfg.label} average (selected period)"
 
         rank = (
             map_metrics.dropna(subset=[ranking_value_col])

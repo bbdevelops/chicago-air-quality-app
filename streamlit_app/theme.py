@@ -16,38 +16,24 @@ Each theme is a plain dict so callers can read palette entries directly.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import plotly.graph_objects as go
 
-# ── AQI band colorscale (shared by both themes) ─────────────────────────────
-# Official EPA category colors as a stepped continuous scale over AQI 0–500.
-# Used with range_color=[0, 500] so the map colors mean the same thing every
-# time regardless of the data range in view.
-_AQI_STOPS = [
-    (0, "#00e400"),   # Good
-    (50, "#00e400"),
-    (50, "#ffff00"),  # Moderate
-    (100, "#ffff00"),
-    (100, "#ff7e00"),  # USG
-    (150, "#ff7e00"),
-    (150, "#ff0000"),  # Unhealthy
-    (200, "#ff0000"),
-    (200, "#8f3f97"),  # Very Unhealthy
-    (300, "#8f3f97"),
-    (300, "#7e0023"),  # Hazardous
-    (500, "#7e0023"),
-]
-AQI_COLORSCALE = [[value / 500.0, color] for value, color in _AQI_STOPS]
-AQI_RANGE = (0, 500)
+# ── AQI band colorscale (derived from the shared aqi.py module) ─────────────
+# Instead of hand-coding the stops and CSS gradient, we build them
+# programmatically from AQI_CATEGORIES (single source of truth).
+try:
+    from aqi import build_aqi_colorscale, build_aqi_css_gradient
+except ModuleNotFoundError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from aqi import build_aqi_colorscale, build_aqi_css_gradient
 
-# CSS linear-gradient mirroring AQI_COLORSCALE, for the mobile HTML legend bar.
-AQI_CSS_GRADIENT = (
-    "linear-gradient(to right,"
-    "#00e400 0%,#00e400 10%,#ffff00 10%,#ffff00 20%,"
-    "#ff7e00 20%,#ff7e00 30%,#ff0000 30%,#ff0000 40%,"
-    "#8f3f97 40%,#8f3f97 60%,#7e0023 60%,#7e0023 100%)"
-)
+AQI_COLORSCALE = build_aqi_colorscale()
+AQI_RANGE = (0, 500)
+AQI_CSS_GRADIENT = build_aqi_css_gradient()
 
 
 TERMINAL: dict[str, Any] = {
@@ -108,17 +94,27 @@ def get_theme(name: str | None) -> dict[str, Any]:
     return THEMES.get(name or "Terminal", TERMINAL)
 
 
-def style_fig(fig: go.Figure, theme: dict[str, Any], *, axes: bool = True) -> go.Figure:
+def style_fig(
+    fig: go.Figure,
+    theme: dict[str, Any],
+    *,
+    axes: bool = True,
+    margin: dict[str, int] | None = None,
+) -> go.Figure:
     """Apply the theme's backgrounds, fonts, and axis grids to a Plotly figure.
 
     ``axes=False`` skips axis styling (for maps / imshow that have no x/y grid).
+    ``margin`` overrides the figure margin (default: None = don't touch).
     """
-    fig.update_layout(
-        paper_bgcolor=theme["paper_bg"],
-        plot_bgcolor=theme["plot_bg"],
-        font={"color": theme["font_color"], "family": theme["font_family"]},
-        title_font={"color": theme["accent"]},
-    )
+    layout_kwargs: dict[str, Any] = {
+        "paper_bgcolor": theme["paper_bg"],
+        "plot_bgcolor": theme["plot_bg"],
+        "font": {"color": theme["font_color"], "family": theme["font_family"]},
+        "title_font": {"color": theme["accent"]},
+    }
+    if margin is not None:
+        layout_kwargs["margin"] = margin
+    fig.update_layout(**layout_kwargs)
     if axes:
         fig.update_xaxes(gridcolor=theme["grid"], color=theme["font_color"])
         fig.update_yaxes(gridcolor=theme["grid"], color=theme["font_color"])
