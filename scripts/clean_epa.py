@@ -15,23 +15,14 @@ value per site/day: mean of ``arithmetic_mean`` and the max reported ``aqi``
 
 from __future__ import annotations
 
-import logging
-from pathlib import Path
-
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
+from _common import CLEAN_DIR, EPA_CLEANED, EPA_RAW, setup_logging
 
 PM25_PARAM = "88101"
 NO2_PARAM = "42602"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 def _site_id(df: pd.DataFrame) -> pd.Series:
@@ -100,18 +91,16 @@ def clean_epa_frame(df: pd.DataFrame) -> pd.DataFrame:
 def main() -> None:
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_path = RAW_DIR / "epa_aqs_daily.csv"
-    if not raw_path.exists():
-        log.warning("Raw EPA file not found: %s — skipping (run extract_epa.py first).", raw_path)
+    if not EPA_RAW.exists():
+        log.warning("Raw EPA file not found: %s — skipping (run extract_epa.py first).", EPA_RAW)
         return
 
-    df = pd.read_csv(raw_path)
+    df = pd.read_csv(EPA_RAW)
     log.info("Loaded %d raw EPA rows.", len(df))
 
     clean = clean_epa_frame(df)
-    out_path = CLEAN_DIR / "epa_reference_daily.csv"
-    clean.to_csv(out_path, index=False)
-    log.info("Saved cleaned EPA reference file → %s  (%d rows)", out_path, len(clean))
+    clean.to_csv(EPA_CLEANED, index=False)
+    log.info("Saved cleaned EPA reference file → %s  (%d rows)", EPA_CLEANED, len(clean))
 
     if not clean.empty:
         log.info("Sites: %d   Date range: %s → %s",

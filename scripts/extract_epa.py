@@ -27,19 +27,17 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import logging
 import os
 import time
 from datetime import date, datetime
-from pathlib import Path
 
 import pandas as pd
 import requests
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = PROJECT_ROOT / "config.ini"
+from _common import EPA_RAW, RAW_DIR, PROJECT_ROOT, cache_is_fresh, setup_logging
 
+CONFIG_FILE = PROJECT_ROOT / "config.ini"
 config = configparser.ConfigParser()
 config.read(CONFIG_FILE)
 
@@ -56,23 +54,10 @@ NO2_PARAM = EPA_CONFIG["no2_param"]
 START_DATE = config["socrata"]["start_date"]
 CACHE_MAX_AGE_HOURS = int(config["socrata"].get("cache_max_age_hours", "24"))
 
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CACHE_FILE = RAW_DIR / "epa_aqs_daily.csv"
+log = setup_logging(__name__)
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
-
-
-def cache_is_fresh(path: Path, max_age_hours: float) -> bool:
-    if not path.exists():
-        return False
-    age_hours = (time.time() - path.stat().st_mtime) / 3600
-    return age_hours < max_age_hours
-
-
 def _year_chunks(start: date, end: date) -> list[tuple[str, str]]:
     """Split [start, end] into (bdate, edate) YYYYMMDD strings per calendar year.
 
@@ -144,8 +129,8 @@ def main() -> None:
         # Not an error: EPA is an optional enrichment. Exit cleanly.
         return
 
-    if not args.force and cache_is_fresh(CACHE_FILE, CACHE_MAX_AGE_HOURS):
-        log.info("Cache is fresh (%s). Use --force to re-pull.", CACHE_FILE)
+    if not args.force and cache_is_fresh(EPA_RAW, CACHE_MAX_AGE_HOURS):
+        log.info("Cache is fresh (%s). Use --force to re-pull.", EPA_RAW)
         return
 
     start = datetime.fromisoformat(START_DATE).date()
@@ -157,8 +142,8 @@ def main() -> None:
         return
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    df.to_csv(CACHE_FILE, index=False)
-    log.info("Saved %d rows → %s", len(df), CACHE_FILE)
+    df.to_csv(EPA_RAW, index=False)
+    log.info("Saved %d rows → %s", len(df), EPA_RAW)
     if "date_local" in df.columns:
         log.info("Date range: %s → %s", df["date_local"].min(), df["date_local"].max())
     if "parameter" in df.columns:

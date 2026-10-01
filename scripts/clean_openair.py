@@ -11,34 +11,24 @@ Input:   data/raw/openair_daily.csv
 Output:  data/clean/openair_daily_cleaned.csv
 """
 
-import logging
-from pathlib import Path
-
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
+from _common import CLEAN_DIR, OPENAIR_CLEANED, OPENAIR_RAW, setup_logging
 
 PM25_OUTLIER_UPPER = 150.0   # µg/m³ — flag but keep
 PM25_OUTLIER_LOWER = 0.0
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 def main() -> None:
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
-    raw_path = RAW_DIR / "openair_daily.csv"
-    if not raw_path.exists():
-        log.error("Raw file not found: %s  — run extract_openair.py first.", raw_path)
+    if not OPENAIR_RAW.exists():
+        log.error("Raw file not found: %s  — run extract_openair.py first.", OPENAIR_RAW)
         return
 
-    df = pd.read_csv(raw_path)
+    df = pd.read_csv(OPENAIR_RAW)
     log.info("Loaded %d raw rows.", len(df))
 
     # ---- Normalise column names to lowercase --------------------------------
@@ -99,7 +89,6 @@ def main() -> None:
 
     # ---- Rename to clean schema --------------------------------------------
     rename_map = {
-        "sensor_name": "sensor_name",
         "datasourceid": "sensor_id",
         pm25_col: "pm25_mean",
         "latitude": "lat",
@@ -117,9 +106,8 @@ def main() -> None:
     df = df[[c for c in keep if c in df.columns]]
 
     # ---- Save ---------------------------------------------------------------
-    out_path = CLEAN_DIR / "openair_daily_cleaned.csv"
-    df.to_csv(out_path, index=False)
-    log.info("Saved cleaned file → %s  (%d rows)", out_path, len(df))
+    df.to_csv(OPENAIR_CLEANED, index=False)
+    log.info("Saved cleaned file → %s  (%d rows)", OPENAIR_CLEANED, len(df))
 
     # Summary
     log.info("Date range:     %s → %s", df["date"].min(), df["date"].max())

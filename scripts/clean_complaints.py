@@ -12,28 +12,17 @@ Inputs
 
 Outputs
 -------
-  data/clean/complaints_cleaned.csv          — one row per complaint
-  data/clean/complaints_daily_by_sensor.csv  — daily complaint counts
-                                               aggregated to nearest sensor
+  data/clean/complaints_cleaned.csv  — one row per complaint
 """
 
-import logging
-from pathlib import Path
-
 import pandas as pd
-from geopy.distance import great_circle
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
+from pathlib import Path
+from aqi import haversine_km
+from _common import COMPLAINTS_RAW, OPENAIR_RAW, COMPLAINTS_CLEANED, CLEAN_DIR, setup_logging
 
 MAX_SENSOR_DISTANCE_M = 2_000  # flag complaints farther than 2 km
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -66,16 +55,11 @@ def find_nearest_sensor(
 ) -> tuple[str, float]:
     """
     Return (sensor_name, distance_in_metres) for the closest sensor.
-    Uses Haversine via geopy.
+    Uses vectorized haversine_km from aqi module.
     """
-    dists = sensors.apply(
-        lambda row: great_circle(
-            (lat, lon), (row["sensor_lat"], row["sensor_lon"])
-        ).meters,
-        axis=1,
-    )
-    idx = dists.idxmin()
-    return sensors.loc[idx, "sensor_name"], dists[idx]
+    dists_km = haversine_km(lat, lon, sensors["sensor_lat"], sensors["sensor_lon"])
+    idx = dists_km.idxmin()
+    return sensors.loc[idx, "sensor_name"], dists_km[idx] * 1000
 
 
 # ---------------------------------------------------------------------------
@@ -85,12 +69,11 @@ def main() -> None:
     CLEAN_DIR.mkdir(parents=True, exist_ok=True)
 
     # ---- Load raw complaints ------------------------------------------------
-    raw_path = RAW_DIR / "cdph_air_complaints.csv"
-    if not raw_path.exists():
-        log.error("Raw complaints file not found: %s  — run extract_complaints.py first.", raw_path)
+    if not COMPLAINTS_RAW.exists():
+        log.error("Raw complaints file not found: %s  — run extract_complaints.py first.", COMPLAINTS_RAW)
         return
 
-    df = pd.read_csv(raw_path, parse_dates=["complaint_date"])
+    df = pd.read_csv(COMPLAINTS_RAW, parse_dates=["complaint_date"])
     log.info("Loaded %d raw complaints.", len(df))
 
     # ---- Drop rows missing date or location ---------------------------------
@@ -104,12 +87,11 @@ def main() -> None:
     df["month"] = df["complaint_date"].dt.month
 
     # ---- Spatial join: nearest sensor ---------------------------------------
-    openair_path = RAW_DIR / "openair_daily.csv"
-    if not openair_path.exists():
-        log.error("Open Air daily file not found: %s  — run extract_openair.py first.", openair_path)
+    if not OPENAIR_RAW.exists():
+        log.error("Open Air daily file not found: %s  — run extract_openair.py first.", OPENAIR_RAW)
         return
 
-    sensors = build_sensor_locations(openair_path)
+    sensors = build_sensor_locations(OPENAIR_RAW)
 
     log.info("Assigning each complaint to nearest sensor (Haversine) …")
     nearest = df.apply(
@@ -128,24 +110,8 @@ def main() -> None:
     )
 
     # ---- Save cleaned complaint-level file ----------------------------------
-    out_path = CLEAN_DIR / "complaints_cleaned.csv"
-    df.to_csv(out_path, index=False)
-    log.info("Saved complaint-level file → %s  (%d rows)", out_path, len(df))
-
-    # ---- Aggregate daily counts per sensor ----------------------------------
-    daily = (
-        df.groupby(["nearest_sensor", "date"])
-        .agg(
-            complaint_count=("complaint_id", "size"),
-            mean_distance_m=("distance_to_sensor_m", "mean"),
-        )
-        .reset_index()
-    )
-    daily["date"] = pd.to_datetime(daily["date"])
-
-    daily_path = CLEAN_DIR / "complaints_daily_by_sensor.csv"
-    daily.to_csv(daily_path, index=False)
-    log.info("Saved daily aggregation → %s  (%d rows)", daily_path, len(daily))
+    df.to_csv(COMPLAINTS_CLEANED, index=False)
+    log.info("Saved complaint-level file → %s  (%d rows)", COMPLAINTS_CLEANED, len(df))
 
 
 if __name__ == "__main__":

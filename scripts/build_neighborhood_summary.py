@@ -5,7 +5,7 @@ Produce a single-row-per-neighborhood summary table that covers ALL 98
 Chicago neighborhoods — including the 14 that have no Open Air sensors.
 
 This file is designed to be the **data source joined to the GeoJSON**
-in Tableau so every polygon gets its own name and colour on the map,
+so every polygon gets its own name and colour on the map,
 even when a neighbourhood has no sensor coverage.
 
 Inputs
@@ -19,21 +19,40 @@ Output
   data/clean/neighborhood_summary.csv       — one row per neighborhood
 """
 
-import logging
-from pathlib import Path
-
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-CLEAN_DIR = DATA_DIR / "clean"
-NEIGHBORHOODS_CSV = DATA_DIR / "Neighborhoods_2012b_20260228.csv"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
+from _common import (
+    CLEAN_DIR,
+    COMPLAINTS_CLEANED,
+    NEIGHBORHOODS_CSV,
+    NEIGHBORHOOD_SUMMARY,
+    OPENAIR_CLEANED,
+    setup_logging,
 )
-log = logging.getLogger(__name__)
+
+log = setup_logging(__name__)
+
+
+def _aggregate_neighborhoods(air: pd.DataFrame) -> pd.DataFrame:
+    # Compute spike flag inline (PM2.5 > 35 µg/m³, consistent with
+    # merge_datasets.py). This is distinct from pm25_outlier (>150 µg/m³).
+    if "pm25_spike" not in air.columns:
+        air["pm25_spike"] = (pd.to_numeric(air["pm25_mean"], errors="coerce") > 35).astype(int)
+    sensor_agg = (
+        air.groupby("neighborhood", as_index=False)
+        .agg(
+            sensor_count=("sensor_name", "nunique"),
+            reading_days=("date", "nunique"),
+            pm25_mean=("pm25_mean", "mean"),
+            pm25_median=("pm25_mean", "median"),
+            pm25_max=("pm25_mean", "max"),
+            pm25_min=("pm25_mean", "min"),
+            pm25_std=("pm25_mean", "std"),
+            no2_mean=("no2_mean", "mean"),
+            spike_days=("pm25_spike", "sum"),
+        )
+    )
+    return sensor_agg.round(2)
 
 
 def main() -> None:
@@ -49,32 +68,16 @@ def main() -> None:
     log.info("Authority list: %d neighborhoods.", len(all_neighs))
 
     # ---- Sensor-reading aggregates ------------------------------------------
-    air_path = CLEAN_DIR / "openair_daily_cleaned.csv"
-    if air_path.exists():
-        air = pd.read_csv(air_path)
-        sensor_agg = (
-            air.groupby("neighborhood", as_index=False)
-            .agg(
-                sensor_count=("sensor_name", "nunique"),
-                reading_days=("date", "nunique"),
-                pm25_mean=("pm25_mean", "mean"),
-                pm25_median=("pm25_mean", "median"),
-                pm25_max=("pm25_mean", "max"),
-                pm25_min=("pm25_mean", "min"),
-                pm25_std=("pm25_mean", "std"),
-                no2_mean=("no2_mean", "mean"),
-                spike_days=("pm25_outlier", "sum"),
-            )
-        )
-        sensor_agg = sensor_agg.round(2)
+    if OPENAIR_CLEANED.exists():
+        air = pd.read_csv(OPENAIR_CLEANED)
+        sensor_agg = _aggregate_neighborhoods(air)
     else:
         log.warning("Sensor data not found — skipping air quality metrics.")
         sensor_agg = pd.DataFrame(columns=["neighborhood"])
 
     # ---- Complaint aggregates -----------------------------------------------
-    comp_path = CLEAN_DIR / "complaints_cleaned.csv"
-    if comp_path.exists():
-        comp = pd.read_csv(comp_path)
+    if COMPLAINTS_CLEANED.exists():
+        comp = pd.read_csv(COMPLAINTS_CLEANED)
         comp_agg = (
             comp.groupby("neighborhood", as_index=False)
             .agg(
@@ -90,7 +93,7 @@ def main() -> None:
     summary = all_neighs.merge(sensor_agg, on="neighborhood", how="left")
     summary = summary.merge(comp_agg, on="neighborhood", how="left")
 
-    # Fill NaN counts with 0, leave means as NaN (Tableau will show "no data")
+    # Fill NaN counts with 0, leave means as NaN
     for col in ("sensor_count", "reading_days", "spike_days",
                 "total_complaints", "complaint_days"):
         if col in summary.columns:
@@ -103,9 +106,8 @@ def main() -> None:
     summary = summary.sort_values("pm25_mean", ascending=False, na_position="last")
 
     # ---- Save ---------------------------------------------------------------
-    out_path = CLEAN_DIR / "neighborhood_summary.csv"
-    summary.to_csv(out_path, index=False)
-    log.info("Saved → %s  (%d rows, %d columns)", out_path, len(summary), len(summary.columns))
+    summary.to_csv(NEIGHBORHOOD_SUMMARY, index=False)
+    log.info("Saved → %s  (%d rows, %d columns)", NEIGHBORHOOD_SUMMARY, len(summary), len(summary.columns))
 
     # ---- Report -------------------------------------------------------------
     with_data = (summary["has_sensor_coverage"] == 1).sum()

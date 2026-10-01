@@ -18,56 +18,20 @@ Inputs
 Outputs (overwrites in-place)
 -------
   data/clean/complaints_cleaned.csv          — adds 'neighborhood' column
-  data/clean/complaints_daily_by_sensor.csv  — adds 'neighborhood' column
   data/clean/openair_daily_cleaned.csv       — adds 'neighborhood' column
 """
 
-import logging
-from pathlib import Path
-
 import pandas as pd
-from shapely import wkt
 from shapely.geometry import Point
-from shapely.prepared import prep
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-CLEAN_DIR = DATA_DIR / "clean"
-
-NEIGHBORHOODS_CSV = DATA_DIR / "Neighborhoods_2012b_20260228.csv"
+from _common import COMPLAINTS_CLEANED, OPENAIR_CLEANED, setup_logging
+from _neighborhoods import load_boundaries
 
 # Max distance (in degrees, ~1 km) to snap an unmatched point to the
 # nearest neighborhood boundary.  Points beyond this remain unassigned.
 SNAP_TOLERANCE_DEG = 0.01   # ~1.1 km at Chicago's latitude
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Load & parse neighborhood polygons
-# ---------------------------------------------------------------------------
-def load_neighborhoods(path: Path) -> list[tuple[str, str, object, object]]:
-    """
-    Return a list of (pri_neigh, sec_neigh, prepared_geometry, raw_geometry)
-    tuples.  The prepared geometry is used for fast point-in-polygon tests;
-    the raw geometry is kept for nearest-boundary distance fallback.
-    """
-    df = pd.read_csv(path)
-    neighborhoods = []
-    for _, row in df.iterrows():
-        try:
-            geom = wkt.loads(row["the_geom"])
-            neighborhoods.append(
-                (row["PRI_NEIGH"], row["SEC_NEIGH"], prep(geom), geom)
-            )
-        except Exception as e:
-            log.warning("Skipping neighborhood %s: %s", row.get("PRI_NEIGH", "?"), e)
-    log.info("Loaded %d neighborhood polygons.", len(neighborhoods))
-    return neighborhoods
+log = setup_logging(__name__)
 
 
 def assign_neighborhood(
@@ -136,51 +100,30 @@ def assign_column(
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
-    if not NEIGHBORHOODS_CSV.exists():
-        log.error("Neighborhood boundaries file not found: %s", NEIGHBORHOODS_CSV)
+    neighborhoods = load_boundaries()
+    if not neighborhoods:
         return
 
-    neighborhoods = load_neighborhoods(NEIGHBORHOODS_CSV)
-
     # ---- 1. Complaints (row-level) ------------------------------------------
-    comp_path = CLEAN_DIR / "complaints_cleaned.csv"
-    if comp_path.exists():
+    if COMPLAINTS_CLEANED.exists():
         log.info("Assigning neighborhoods to complaints …")
-        comp = pd.read_csv(comp_path)
+        comp = pd.read_csv(COMPLAINTS_CLEANED)
         comp = assign_column(comp, "latitude", "longitude", neighborhoods)
-        comp.to_csv(comp_path, index=False)
-        log.info("Updated %s", comp_path.name)
+        comp.to_csv(COMPLAINTS_CLEANED, index=False)
+        log.info("Updated %s", COMPLAINTS_CLEANED.name)
     else:
-        log.warning("Skipping complaints — %s not found.", comp_path)
+        log.warning("Skipping complaints — %s not found.", COMPLAINTS_CLEANED)
 
-    # ---- 2. Daily complaint aggregation -------------------------------------
-    #   Re-aggregate with neighborhood from updated complaints
-    if comp_path.exists():
-        log.info("Re-aggregating daily complaint counts with neighborhood …")
-        comp = pd.read_csv(comp_path, parse_dates=["date"])
-        daily = (
-            comp.groupby(["nearest_sensor", "date", "neighborhood"])
-            .agg(
-                complaint_count=("complaint_id", "size"),
-                mean_distance_m=("distance_to_sensor_m", "mean"),
-            )
-            .reset_index()
-        )
-        daily["date"] = pd.to_datetime(daily["date"])
-        daily_path = CLEAN_DIR / "complaints_daily_by_sensor.csv"
-        daily.to_csv(daily_path, index=False)
-        log.info("Updated %s  (%d rows)", daily_path.name, len(daily))
 
-    # ---- 3. Sensor readings -------------------------------------------------
-    air_path = CLEAN_DIR / "openair_daily_cleaned.csv"
-    if air_path.exists():
+    # ---- 2. Sensor readings -------------------------------------------------
+    if OPENAIR_CLEANED.exists():
         log.info("Assigning neighborhoods to sensor readings …")
-        air = pd.read_csv(air_path)
+        air = pd.read_csv(OPENAIR_CLEANED)
         air = assign_column(air, "lat", "lon", neighborhoods)
-        air.to_csv(air_path, index=False)
-        log.info("Updated %s", air_path.name)
+        air.to_csv(OPENAIR_CLEANED, index=False)
+        log.info("Updated %s", OPENAIR_CLEANED.name)
     else:
-        log.warning("Skipping sensor readings — %s not found.", air_path)
+        log.warning("Skipping sensor readings — %s not found.", OPENAIR_CLEANED)
 
     log.info("Neighborhood assignment complete.")
 

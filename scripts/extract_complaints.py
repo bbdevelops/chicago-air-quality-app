@@ -16,67 +16,32 @@ Respectful API usage:
 """
 
 import argparse
-import configparser
-import logging
-import os
 import sys
 import time
-from pathlib import Path
 
 import pandas as pd
-from dotenv import load_dotenv
-from sodapy import Socrata
+
+from _common import COMPLAINTS_RAW, RAW_DIR, cache_is_fresh, setup_logging
+from _socrata import load_socrata_config, load_token, make_client
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = PROJECT_ROOT / "config.ini"
+_cfg = load_socrata_config()
+DATASET_ID = _cfg["complaints_dataset_id"]
+DOMAIN = _cfg["domain"]
+BATCH_SIZE = _cfg["batch_size"]
+CACHE_MAX_AGE_HOURS = _cfg["cache_max_age_hours"]
+START_DATE = _cfg["start_date"]
+APP_TOKEN_ENV_VAR = _cfg["app_token_env_var"]
+APP_SECRET_ENV_VAR = _cfg["app_secret_env_var"]
 
-config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
-
-SOCRATA_CONFIG = config["socrata"]
-DATASET_ID = SOCRATA_CONFIG["complaints_dataset_id"]
-DOMAIN = SOCRATA_CONFIG["domain"]
-BATCH_SIZE = int(SOCRATA_CONFIG["batch_size"])
-CACHE_MAX_AGE_HOURS = int(SOCRATA_CONFIG["cache_max_age_hours"])
-START_DATE = SOCRATA_CONFIG["start_date"]
-APP_TOKEN_ENV_VAR = SOCRATA_CONFIG["app_token_env_var"]
-APP_SECRET_ENV_VAR = SOCRATA_CONFIG["app_secret_env_var"]
-
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CACHE_FILE = RAW_DIR / "cdph_air_complaints.csv"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def cache_is_fresh(path: Path, max_age_hours: float) -> bool:
-    """Return True if *path* exists and was modified less than *max_age_hours* ago."""
-    if not path.exists():
-        return False
-    age_hours = (time.time() - path.stat().st_mtime) / 3600
-    return age_hours < max_age_hours
-
-
-def _make_client(app_token: str | None, app_secret: str | None, timeout: int = 60) -> Socrata:
-    """
-    Create a Socrata client.  Per the Socrata docs:
-      - app_token  → sent as X-App-Token header (Key ID / public)
-      - app_secret → used with app_token for HTTP Basic Auth (Key Secret / private)
-    """
-    if app_token and app_secret:
-        # HTTP Basic Auth: Key ID as username, Key Secret as password
-        return Socrata(DOMAIN, app_token, username=app_token,
-                       password=app_secret, timeout=timeout)
-    return Socrata(DOMAIN, app_token, timeout=timeout)
 
 
 def pull_complaints(app_token: str | None, app_secret: str | None = None) -> pd.DataFrame:
@@ -99,7 +64,7 @@ def pull_complaints(app_token: str | None, app_secret: str | None = None) -> pd.
         if attempt > 0 and tok == app_token and sec == app_secret:
             continue  # skip duplicate combos
         try:
-            client = _make_client(tok, sec)
+            client = make_client(DOMAIN, tok, sec)
             log.info("Pulling CDPH complaints since %s (auth attempt %d) …",
                      START_DATE, attempt + 1)
             log.info("  GET  offset=%d  limit=%d", offset, BATCH_SIZE)
@@ -151,23 +116,12 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Ignore cache and re-pull")
     args = parser.parse_args()
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    app_token = os.getenv(APP_TOKEN_ENV_VAR)
-    app_secret = os.getenv(APP_SECRET_ENV_VAR)
-
-    if not app_token or app_token.startswith("PASTE"):
-        log.warning(
-            f"No valid {APP_TOKEN_ENV_VAR} found in .env — API requests will be "
-            "throttled to 1 000/hr.  Register a free token at:\n"
-            "  https://data.cityofchicago.org/profile/edit/developer"
-        )
-        app_token = None
-        app_secret = None
+    app_token, app_secret = load_token(APP_TOKEN_ENV_VAR, APP_SECRET_ENV_VAR)
 
     # Check cache freshness
-    if not args.force and cache_is_fresh(CACHE_FILE, CACHE_MAX_AGE_HOURS):
-        log.info("Cache is fresh (%s). Use --force to re-pull.", CACHE_FILE)
-        df = pd.read_csv(CACHE_FILE)
+    if not args.force and cache_is_fresh(COMPLAINTS_RAW, CACHE_MAX_AGE_HOURS):
+        log.info("Cache is fresh (%s). Use --force to re-pull.", COMPLAINTS_RAW)
+        df = pd.read_csv(COMPLAINTS_RAW)
         log.info("Loaded %d cached rows.", len(df))
         return
 
@@ -188,8 +142,8 @@ def main() -> None:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    df.to_csv(CACHE_FILE, index=False)
-    log.info("Saved %d rows → %s", len(df), CACHE_FILE)
+    df.to_csv(COMPLAINTS_RAW, index=False)
+    log.info("Saved %d rows → %s", len(df), COMPLAINTS_RAW)
 
     # Summary stats
     date_min = df["complaint_date"].min()

@@ -22,7 +22,7 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
 DB_DIR = PROJECT_ROOT / "db"
-DB_PATH = DB_DIR / "citizen_sensor.db"
+DB_PATH = DB_DIR / "chicago_air_quality.db"
 
 logging.basicConfig(
     level=logging.INFO,
