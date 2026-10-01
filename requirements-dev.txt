@@ -4,3 +4,4 @@
 ruff>=0.6.0
 nbstripout>=0.7.0
 pre-commit>=3.7.0
+pytest>=8.0.0
