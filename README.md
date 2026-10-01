@@ -27,42 +27,46 @@ chicago-air-quality-app/
 ├── .env                            # Local API tokens (ignored by git)
 ├── .env.example                    # Safe template for token variables
 ├── requirements.txt                # App + pipeline dependencies
-├── requirements-notebooks.txt      # Optional notebook-only dependencies
+├── pyproject.toml                  # Project + testing configuration
+├── aqi.py                          # AQI calculation functions
 │
 ├── scripts/
 │   ├── extract_complaints.py       # Pull 311 complaints from Socrata API
 │   ├── extract_openair.py          # Pull Open Air daily aggregations from Socrata
+│   ├── extract_epa.py              # Pull EPA AQS regulatory monitors (Cook County)
 │   ├── clean_complaints.py         # Clean complaints, assign nearest sensor
 │   ├── clean_openair.py            # Clean sensor data, flag PM2.5 outliers
+│   ├── clean_epa.py                # Clean EPA AQS data
 │   ├── export_neighborhoods_geojson.py  # Convert boundary CSV → GeoJSON
 │   ├── assign_neighborhoods.py     # Point-in-polygon neighborhood assignment
 │   ├── merge_datasets.py           # Join sensor readings + complaint counts
 │   ├── build_neighborhood_summary.py   # One-row-per-neighborhood summary
 │   ├── load_sqlite.py              # Load clean CSVs → SQLite database
-│   └── sql_queries.sql             # Example analytical SQL queries
+│   ├── sql_queries.sql             # Example analytical SQL queries
+│   ├── _common.py                  # Shared logic and paths
+│   ├── _socrata.py                 # Shared Socrata client setup
+│   └── _neighborhoods.py           # Shared spatial joins
 │
 ├── data/
 │   ├── Neighborhoods_2012b_20260228.csv  # Official Chicago neighborhood boundaries
 │   ├── raw/                        # Raw API extracts (cached CSVs)
-│   │   ├── cdph_air_complaints.csv
-│   │   └── openair_daily.csv
 │   └── clean/                      # Cleaned, analysis-ready outputs
-│       ├── complaints_cleaned.csv
-│       ├── complaints_daily_by_sensor.csv
-│       ├── openair_daily_cleaned.csv
-│       ├── merged_complaints_air.csv   # ← Primary analysis dataset
-│       ├── neighborhood_summary.csv
-│       └── chicago_neighborhoods.geojson
 │
 ├── db/
-│   └── citizen_sensor.db           # SQLite database (3 tables)
+│   └── chicago_air_quality.db      # SQLite database (3 tables)
 │
 ├── notebooks/
-│   └── eda.ipynb                   # Exploratory analysis notebook
+│   ├── eda.ipynb                   # Exploratory analysis notebook
+│   └── complaint_air_correlation.ipynb  # Guided correlation walkthrough
 │
 ├── logs/                           # Pipeline run logs (timestamped)
 │
+├── tests/                          # Pytest suite
+│
 └── streamlit_app/                  # Streamlit dashboard app
+    ├── app.py                      # Main entrypoint
+    ├── dashboard_data.py           # Data processing logic
+    └── theme.py                    # Accessible UI theme definition
 ```
 
 ---
@@ -79,6 +83,12 @@ For notebooks only (optional):
 
 ```bash
 pip install -r requirements-notebooks.txt
+```
+
+For development / CI tooling (ruff, pre-commit, nbstripout):
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 ### 2. Configure API tokens
@@ -109,14 +119,17 @@ python run_pipeline.py --skip-api
 
 # Force re-download from API
 python run_pipeline.py --force
+
+# Also pull EPA AQS regulatory reference monitors (needs EPA_API_* in .env)
+python run_pipeline.py --with-epa
 ```
 
 ### 4. Explore the data
 
 - Open `notebooks/eda.ipynb` for exploratory analysis
 - Open `notebooks/complaint_air_correlation.ipynb` for guided correlation analysis
-- Launch Streamlit app: `python -m streamlit run streamlit_app/app.py`
-- Query `db/citizen_sensor.db` with any SQL client
+- Launch Streamlit app: `python -m python -m streamlit run streamlit_app/app.py`
+- Query `db/chicago_air_quality.db` with any SQL client
 
 ---
 
@@ -130,10 +143,12 @@ using the same pipeline outputs in `data/clean/`:
 
 ### Features
 
+- **EPA Air Quality Index (AQI)** using the official 2024-revised PM2.5 breakpoints — an AQI hero banner with health guidance, an AQI map metric, and AQI health-color bands
+- **Theme toggle**: dark "Terminal" look or a light, high-contrast **Accessible** palette (EPA health colors), switchable from the sidebar
 - Dual map modes: **Neighborhood choropleth** (default) and **Continuous heatmap**
 - Neighborhood polygon overlay from `chicago_neighborhoods.geojson`
 - Sensor marker overlay (PM2.5 and complaint totals)
-- IDW placeholder estimates for neighborhoods with no direct sensor-period values
+- IDW placeholder estimates for neighborhoods with no direct sensor-period values, with adjustable k / distance-power / max-distance controls
 - Dual-axis daily trend chart (PM2.5 vs complaints)
 - Lead-lag correlation chart and spike-window concordance view
 - Coverage QA tab with `coverage_source` diagnostics (`direct`, `estimated_idw`, `unavailable`)
@@ -184,13 +199,7 @@ Option B: Native process manager (systemd/PM2/supervisor)
 
 ## Testing
 
-Unit tests are under `tests/` and target core pipeline and analytics logic:
-
-- nearest-sensor assignment helpers
-- neighborhood point-in-polygon / snap fallback logic
-- hourly-to-daily weighted re-aggregation logic
-- Streamlit analytics functions (filters, aggregations, lag metrics, spike windows)
-- neighborhood IDW estimation logic and unavailable-fallback behavior
+Unit tests are under `tests/` and target core pipeline and analytics logic. See [TESTING.md](TESTING.md) for details.
 
 Run tests:
 
@@ -198,25 +207,11 @@ Run tests:
 pytest
 ```
 
-Detailed testing guide (including manual false-positive checks):
-
-- `TESTING.md`
-
 ---
 
 ## Pipeline Steps
 
-| # | Step | Script | Description |
-|---|------|--------|-------------|
-| 1 | Extract complaints | `extract_complaints.py` | Pull CDPH 311 air-pollution work orders from Socrata |
-| 2 | Extract Open Air | `extract_openair.py` | Pull daily PM2.5/NO2 aggregations from Socrata |
-| 3 | Clean complaints | `clean_complaints.py` | Parse dates, assign nearest sensor (Haversine) |
-| 4 | Clean Open Air | `clean_openair.py` | UTC→Chicago time, drop nulls, flag outliers |
-| 5 | Export GeoJSON | `export_neighborhoods_geojson.py` | Convert boundary CSV → GeoJSON for mapping |
-| 6 | Assign neighborhoods | `assign_neighborhoods.py` | Point-in-polygon spatial join for all datasets |
-| 7 | Merge datasets | `merge_datasets.py` | Left-join sensors + complaints, add lag/lead features |
-| 8 | Neighborhood summary | `build_neighborhood_summary.py` | Aggregate stats per neighborhood |
-| 9 | Load SQLite | `load_sqlite.py` | Write 3 tables to SQLite database |
+Run python run_pipeline.py --help for the full list of steps.
 
 ---
 
@@ -244,6 +239,12 @@ One row per neighborhood (all 98), with:
 - Total complaint counts
 - Spike day counts
 
+### `epa_reference_daily.csv` (optional, `--with-epa`)
+One row per EPA regulatory reference site per day (Cook County):
+- `site_id`, `date`, `site_name`, `latitude`, `longitude`
+- `pm25_mean` / `pm25_aqi` — daily mean PM2.5 and EPA's reported AQI
+- `no2_mean` / `no2_aqi` — daily mean NO2 and AQI (NO2 present only at NO2 sites)
+
 ---
 
 ## Removed / Deferred Components
@@ -252,7 +253,7 @@ The following were planned but removed as non-functional stubs:
 
 | Component | Reason | Status |
 |-----------|--------|--------|
-| EPA AirNow integration | API key required, extraction never implemented | **Removed** — Open Air data covers PM2.5/NO2 sufficiently |
+| EPA AirNow (real-time) integration | AirNow API stub, extraction never implemented | **Removed** — Removed in initial versions, re-added as optional EPA AQS integration (regulatory monitors), added as an optional reference source (`--with-epa`; see [Data Sources](#data-sources)) |
 | Visual Crossing weather | API stub only, no downstream usage | **Removed** — can be re-added if weather correlation is needed |
 | Census data cleaning | Stub only, no downstream usage | **Removed** — can be re-added for demographic analysis |
 
@@ -264,6 +265,7 @@ The following were planned but removed as non-functional stubs:
 |--------|------|--------|
 | [CDPH Environmental Complaints](https://data.cityofchicago.org/d/fypr-ksnz) | 311 air pollution work orders | Socrata API (free) |
 | [Open Air Chicago Day Aggregations](https://data.cityofchicago.org/d/rtmx-vkjr) | PM2.5 and NO2 daily means | Socrata API (free) |
+| [EPA Air Quality System (AQS)](https://aqs.epa.gov/aqsweb/documents/data_api.html) | Regulatory PM2.5/NO2 reference monitors + AQI (Cook County) | AQS API (free; optional, `--with-epa`) |
 | Chicago Neighborhoods 2012b | Official boundary polygons | Included in `data/` |
 
 ---

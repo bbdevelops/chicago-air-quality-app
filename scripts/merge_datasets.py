@@ -7,6 +7,8 @@ produce the analysis-ready merged dataset.
 Approach:
   - Start from ALL sensor-day combinations (so days with zero complaints
     are preserved — important for correlation analysis).
+  - Aggregate complaints per sensor per day directly from the cleaned
+    complaint-level file (no intermediate daily file).
   - Left-join the complaint counts.
   - Add lag/lead features for lead-lag analysis:
       pm25_lag1      — previous day's PM2.5 for the same sensor
@@ -14,7 +16,7 @@ Approach:
 
 Inputs
 ------
-  data/clean/complaints_daily_by_sensor.csv
+  data/clean/complaints_cleaned.csv
   data/clean/openair_daily_cleaned.csv
 
 Output
@@ -22,47 +24,42 @@ Output
   data/clean/merged_complaints_air.csv
 """
 
-import logging
-from pathlib import Path
-
 import pandas as pd
+from _common import COMPLAINTS_CLEANED, MERGED_FILE, OPENAIR_CLEANED, setup_logging
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CLEAN_DIR = PROJECT_ROOT / "data" / "clean"
+log = setup_logging(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+
+def _aggregate_complaints(comp: pd.DataFrame) -> pd.DataFrame:
+    # ---- Aggregate complaints per sensor per day ----------------------------
+    # Group directly from the cleaned complaint-level file so that every
+    # complaint is counted regardless of whether it has a neighborhood.
+    comp = comp.copy()
+    comp["date"] = pd.to_datetime(comp["date"])
+    comp_agg = (
+        comp.groupby(["nearest_sensor", "date"], as_index=False, dropna=False)
+        .agg(complaint_count=("complaint_id", "size"))
+        .rename(columns={"nearest_sensor": "sensor_name"})
+    )
+    return comp_agg
 
 
 def main() -> None:
     # ---- Load cleaned datasets ----------------------------------------------
-    air_path = CLEAN_DIR / "openair_daily_cleaned.csv"
-    comp_path = CLEAN_DIR / "complaints_daily_by_sensor.csv"
-
-    for p in (air_path, comp_path):
+    for p in (OPENAIR_CLEANED, COMPLAINTS_CLEANED):
         if not p.exists():
             log.error("Missing: %s — run cleaning scripts first.", p)
             return
 
-    air = pd.read_csv(air_path, parse_dates=["date"])
-    comp = pd.read_csv(comp_path, parse_dates=["date"])
+    air = pd.read_csv(OPENAIR_CLEANED, parse_dates=["date"])
+    comp = pd.read_csv(COMPLAINTS_CLEANED)
 
-    log.info("Sensor readings: %d rows  |  Complaint aggregations: %d rows",
+    log.info("Sensor readings: %d rows  |  Complaints (row-level): %d rows",
              len(air), len(comp))
 
-    # Normalise join key name from complaints
-    comp = comp.rename(columns={"nearest_sensor": "sensor_name"})
+    comp_agg = _aggregate_complaints(comp)
 
     # ---- Left join: keep all sensor-days, add complaint counts --------------
-    # Only bring complaint_count from complaints (sensor's own neighborhood is
-    # more meaningful for the merged spatial analysis)
-    comp_agg = (
-        comp.groupby(["sensor_name", "date"], as_index=False)["complaint_count"].sum()
-    )
-
     merged = air.merge(
         comp_agg,
         on=["sensor_name", "date"],
@@ -95,10 +92,9 @@ def main() -> None:
     merged["pm25_spike"] = (merged["pm25_mean"] > 35).astype(int)
 
     # ---- Save ---------------------------------------------------------------
-    out_path = CLEAN_DIR / "merged_complaints_air.csv"
-    merged.to_csv(out_path, index=False)
+    merged.to_csv(MERGED_FILE, index=False)
     log.info("Saved merged dataset → %s  (%d rows, %d columns)",
-             out_path, len(merged), len(merged.columns))
+             MERGED_FILE, len(merged), len(merged.columns))
 
     # Summary
     log.info("Date range: %s → %s", merged["date"].min().date(), merged["date"].max().date())

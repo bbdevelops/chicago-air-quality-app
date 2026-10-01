@@ -1,11 +1,15 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from scripts.assign_neighborhoods import assign_neighborhood, load_neighborhoods
+from scripts._neighborhoods import load_boundaries
+from scripts.assign_neighborhoods import assign_neighborhood
 
 
-def _write_neighborhood_csv(path: Path) -> None:
+@pytest.fixture
+def mock_neighborhoods(tmp_path: Path):
+    csv_path = tmp_path / "neighborhoods.csv"
     df = pd.DataFrame(
         {
             "the_geom": [
@@ -18,13 +22,12 @@ def _write_neighborhood_csv(path: Path) -> None:
             "SHAPE_LEN": ["4", "4"],
         }
     )
-    df.to_csv(path, index=False)
+    df.to_csv(csv_path, index=False)
+    return load_boundaries(csv_path)
 
 
-def test_assign_neighborhood_exact_point_in_polygon(tmp_path: Path) -> None:
-    csv_path = tmp_path / "neighborhoods.csv"
-    _write_neighborhood_csv(csv_path)
-    neighborhoods = load_neighborhoods(csv_path)
+def test_assign_neighborhood_exact_point_in_polygon(mock_neighborhoods) -> None:
+    neighborhoods = mock_neighborhoods
 
     pri, sec = assign_neighborhood(lat=0.5, lon=0.5, neighborhoods=neighborhoods)
 
@@ -32,10 +35,8 @@ def test_assign_neighborhood_exact_point_in_polygon(tmp_path: Path) -> None:
     assert sec == "A2"
 
 
-def test_assign_neighborhood_snaps_to_nearest_boundary(tmp_path: Path) -> None:
-    csv_path = tmp_path / "neighborhoods.csv"
-    _write_neighborhood_csv(csv_path)
-    neighborhoods = load_neighborhoods(csv_path)
+def test_assign_neighborhood_snaps_to_nearest_boundary(mock_neighborhoods) -> None:
+    neighborhoods = mock_neighborhoods
 
     # Just outside neighborhood A boundary (x=1.0), within snap tolerance.
     pri, sec = assign_neighborhood(lat=0.5, lon=1.005, neighborhoods=neighborhoods)
@@ -44,10 +45,8 @@ def test_assign_neighborhood_snaps_to_nearest_boundary(tmp_path: Path) -> None:
     assert sec == "A2"
 
 
-def test_assign_neighborhood_outside_tolerance_returns_none(tmp_path: Path) -> None:
-    csv_path = tmp_path / "neighborhoods.csv"
-    _write_neighborhood_csv(csv_path)
-    neighborhoods = load_neighborhoods(csv_path)
+def test_assign_neighborhood_outside_tolerance_returns_none(mock_neighborhoods) -> None:
+    neighborhoods = mock_neighborhoods
 
     pri, sec = assign_neighborhood(lat=10.0, lon=10.0, neighborhoods=neighborhoods)
 

@@ -15,9 +15,9 @@ Usage:
 """
 
 import argparse
+import logging
 import subprocess
 import sys
-import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -54,6 +54,15 @@ TRANSFORM_STEPS = [
     ("Load SQLite",                  "load_sqlite.py"),
 ]
 
+# Optional EPA AQS reference-monitor steps (opt-in via --with-epa). Kept out of
+# the default flow so a missing EPA key or AQS outage never breaks the pipeline.
+EPA_EXTRACT_STEPS = [
+    ("Extract EPA AQS reference", "extract_epa.py"),
+]
+EPA_TRANSFORM_STEPS = [
+    ("Clean EPA AQS reference", "clean_epa.py"),
+]
+
 
 def run_step(name: str, script: str, extra_args: list[str] | None = None) -> bool:
     """Run a pipeline step as a subprocess. Returns True on success."""
@@ -74,9 +83,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run the Chicago Air Quality pipeline")
     parser.add_argument("--force",    action="store_true", help="Force API re-pull")
     parser.add_argument("--skip-api", action="store_true", help="Skip extraction steps")
+    parser.add_argument("--with-epa", action="store_true",
+                        help="Also pull/clean EPA AQS reference-monitor data (needs EPA_API_* in .env)")
     args = parser.parse_args()
 
-    log.info("Pipeline started  (force=%s, skip_api=%s)", args.force, args.skip_api)
+    log.info("Pipeline started  (force=%s, skip_api=%s, with_epa=%s)",
+             args.force, args.skip_api, args.with_epa)
     log.info("Log file: %s", log_file)
 
     extra = ["--force"] if args.force else []
@@ -84,7 +96,11 @@ def main() -> None:
     steps: list[tuple[str, str]] = []
     if not args.skip_api:
         steps.extend(EXTRACT_STEPS)
+        if args.with_epa:
+            steps.extend(EPA_EXTRACT_STEPS)
     steps.extend(TRANSFORM_STEPS)
+    if args.with_epa:
+        steps.extend(EPA_TRANSFORM_STEPS)
 
     passed = 0
     for name, script in steps:

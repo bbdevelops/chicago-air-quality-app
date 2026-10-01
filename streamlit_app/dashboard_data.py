@@ -9,6 +9,51 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import shape
 
+# ── AQI constants and functions — single source of truth is aqi.py ─────────
+try:
+    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
+    from aqi import haversine_km as _haversine_km
+except ModuleNotFoundError:
+    # Fallback for direct-script execution where repo root isn't on sys.path
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
+    from aqi import haversine_km as _haversine_km
+
+__all__ = [
+    "add_aqi_columns",
+    "aqi_category",
+    "aqi_health_message",
+    "build_city_daily_metrics",
+    "build_neighborhood_metrics",
+    "build_sensor_snapshot",
+    "compute_lag_correlations",
+    "compute_spike_concordance",
+    "enrich_neighborhood_metrics_with_estimates",
+    "filter_by_date_range",
+    "no2_to_aqi",
+    "pm25_to_aqi",
+]
+
+
+def add_aqi_columns(df: pd.DataFrame, pm25_col: str = "pm25_mean") -> pd.DataFrame:
+    """Add ``pm25_aqi`` and ``aqi_category`` columns from a PM2.5 column.
+
+    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI and
+    ``Unavailable`` category.
+    Returns a copy; input is not mutated.
+    """
+    out = df.copy()
+    if pm25_col not in out.columns:
+        out["pm25_aqi"] = np.nan
+        out["aqi_category"] = "Unavailable"
+        return out
+
+    out["pm25_aqi"] = pd.to_numeric(out[pm25_col], errors="coerce").map(pm25_to_aqi)
+    out["aqi_category"] = out["pm25_aqi"].map(lambda value: aqi_category(value)[0])
+    return out
+
 
 @dataclass(frozen=True)
 class PipelineData:
@@ -73,28 +118,15 @@ def load_pipeline_data(project_root: Path | None = None) -> PipelineData:
     )
 
 
-def filter_complaint_points(
-    complaints: pd.DataFrame,
+def filter_by_date_range(
+    df: pd.DataFrame,
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     neighborhoods: list[str] | None = None,
+    date_col: str = "date",
 ) -> pd.DataFrame:
-    """Filter complaint-level rows to mappable geocoded points."""
-    filtered = complaints[(complaints["date"] >= start_date) & (complaints["date"] <= end_date)]
-    filtered = filtered.dropna(subset=["latitude", "longitude"])
-    if neighborhoods:
-        filtered = filtered[filtered["neighborhood"].isin(neighborhoods)]
-    return filtered.copy()
-
-
-def filter_merged_data(
-    merged: pd.DataFrame,
-    start_date: pd.Timestamp,
-    end_date: pd.Timestamp,
-    neighborhoods: list[str] | None = None,
-) -> pd.DataFrame:
-    """Filter merged sensor-day data by date range and optional neighborhood list."""
-    filtered = merged[(merged["date"] >= start_date) & (merged["date"] <= end_date)]
+    """Filter dataframe by date range and optional neighborhood list."""
+    filtered = df[(df[date_col] >= start_date) & (df[date_col] <= end_date)]
     if neighborhoods:
         filtered = filtered[filtered["neighborhood"].isin(neighborhoods)]
     return filtered.copy()
@@ -182,20 +214,6 @@ def _extract_neighborhood_centroids(neighborhoods_geojson: dict[str, Any]) -> pd
     return pd.DataFrame(rows).drop_duplicates(subset=["neighborhood"])
 
 
-def _haversine_km(lat: float, lon: float, lat_series: pd.Series, lon_series: pd.Series) -> pd.Series:
-    """Return great-circle distance from one point to many points in kilometers."""
-    lat1 = np.radians(lat)
-    lon1 = np.radians(lon)
-    lat2 = np.radians(lat_series.astype(float))
-    lon2 = np.radians(lon_series.astype(float))
-
-    dlat = lat2 - lat1
-    dlon = lon2 - lon1
-    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
-    c = 2.0 * np.arcsin(np.sqrt(a))
-
-    earth_radius_km = 6371.0088
-    return pd.Series(earth_radius_km * c, index=lat_series.index)
 
 
 def _nearest_sensor_rows(
@@ -296,6 +314,7 @@ def enrich_neighborhood_metrics_with_estimates(
         estimate_targets.index.to_list(),
         estimate_targets["centroid_lat"].to_list(),
         estimate_targets["centroid_lon"].to_list(),
+        strict=True,
     ):
         if pd.isna(centroid_lat) or pd.isna(centroid_lon):
             continue
@@ -347,7 +366,6 @@ def enrich_neighborhood_metrics_with_estimates(
         "direct",
         np.where(has_estimate, "estimated_idw", "unavailable"),
     )
-    out["is_estimated"] = out["coverage_source"] == "estimated_idw"
 
     return out
 
@@ -356,7 +374,7 @@ def build_neighborhood_metrics(summary: pd.DataFrame, merged: pd.DataFrame) -> p
     """
     Build date-filtered neighborhood metrics while preserving all neighborhoods.
 
-    This avoids Tableau's NULL-bucket behavior by ensuring every neighborhood
+    This avoids empty buckets by ensuring every neighborhood
     remains present, even when there is no sensor coverage in the selected range.
     """
     base_cols = [
@@ -409,43 +427,51 @@ def compute_spike_concordance(
     city_daily: pd.DataFrame,
     spike_percentile: float = 0.80,
     window_days: int = 2,
+    threshold: float | None = None,
 ) -> tuple[pd.DataFrame, float]:
     """Summarize complaint activity around city-level PM2.5 spike days.
 
-    A spike day is any day where city-wide average PM2.5 is at or above the
-    ``spike_percentile`` quantile of the selected date range.  Using a
-    percentile (rather than a fixed threshold) guarantees spike days are always
-    present regardless of the absolute pollution level in the selected window.
+    A spike day is any day where city-wide average PM2.5 is at or above a
+    threshold. The threshold is either:
+
+    * an absolute ``threshold`` (µg/m³) when provided — e.g. the EPA 24-hour
+      PM2.5 standard of 35 — which anchors spikes to a health-meaningful level; or
+    * the ``spike_percentile`` quantile of PM2.5 over the selected range
+      (default) — which guarantees spike days exist regardless of the absolute
+      pollution level in the window.
+
+    Returns ``(offsets_frame, baseline)`` where ``baseline`` is the mean
+    complaint count on non-spike days.
     """
+    empty = pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"])
     if city_daily.empty:
-        return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
+        return empty, float("nan")
 
     city = city_daily.sort_values("date").copy()
     pm25_valid = city["pm25_mean"].dropna()
     if pm25_valid.empty:
-        return pd.DataFrame(columns=["offset_day", "mean_complaints", "total_complaints"]), float("nan")
+        return empty, float("nan")
 
-    threshold = float(pm25_valid.quantile(spike_percentile))
-    city["is_spike"] = city["pm25_mean"] >= threshold
+    spike_level = float(threshold) if threshold is not None else float(pm25_valid.quantile(spike_percentile))
+    city["is_spike"] = city["pm25_mean"] >= spike_level
 
     spike_dates = city.loc[city["is_spike"], "date"]
     baseline = city.loc[~city["is_spike"], "complaint_count"].mean()
 
+    # Vectorized offset join: look complaint counts up by date rather than
+    # scanning the frame once per (offset, spike-day) pair.
+    complaints_by_date = city.set_index("date")["complaint_count"]
+
     rows = []
     for offset in range(-window_days, window_days + 1):
-        vals = []
-        for spike_date in spike_dates:
-            d = spike_date + pd.Timedelta(days=offset)
-            match_rows = city.loc[city["date"] == d]
-            if not match_rows.empty:
-                vals.append(float(match_rows["complaint_count"].iloc[0]))
-
-        if vals:
+        target_dates = spike_dates + pd.Timedelta(days=offset)
+        matched = complaints_by_date.reindex(target_dates).dropna()
+        if not matched.empty:
             rows.append(
                 {
                     "offset_day": offset,
-                    "mean_complaints": sum(vals) / len(vals),
-                    "total_complaints": sum(vals),
+                    "mean_complaints": float(matched.mean()),
+                    "total_complaints": float(matched.sum()),
                 }
             )
         else:

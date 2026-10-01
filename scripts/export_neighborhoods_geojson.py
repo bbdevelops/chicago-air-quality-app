@@ -2,30 +2,20 @@
 export_neighborhoods_geojson.py
 -------------------------------
 Convert the Neighborhoods_2012b CSV (WKT geometry) into a GeoJSON file
-that Tableau can read as a spatial data source for polygon map overlays.
+that Streamlit can read as a spatial data source for polygon map overlays.
 
 Input:   data/Neighborhoods_2012b_20260228.csv
 Output:  data/clean/chicago_neighborhoods.geojson
 """
 
 import json
-import logging
-from pathlib import Path
 
 import pandas as pd
+from _common import CLEAN_DIR, NEIGHBORHOODS_CSV, NEIGHBORHOODS_GEOJSON, setup_logging
 from shapely import wkt
 from shapely.geometry import mapping
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = PROJECT_ROOT / "data"
-CLEAN_DIR = DATA_DIR / "clean"
-NEIGHBORHOODS_CSV = DATA_DIR / "Neighborhoods_2012b_20260228.csv"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 def main() -> None:
@@ -57,12 +47,11 @@ def main() -> None:
         "features": features,
     }
 
-    out_path = CLEAN_DIR / "chicago_neighborhoods.geojson"
-    with open(out_path, "w", encoding="utf-8") as f:
+    with open(NEIGHBORHOODS_GEOJSON, "w", encoding="utf-8") as f:
         json.dump(geojson, f)
 
     log.info("Wrote %d features → %s (%.1f MB)",
-             len(features), out_path, out_path.stat().st_size / 1e6)
+             len(features), NEIGHBORHOODS_GEOJSON, NEIGHBORHOODS_GEOJSON.stat().st_size / 1e6)
 
 
 if __name__ == "__main__":

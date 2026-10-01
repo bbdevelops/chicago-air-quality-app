@@ -1,6 +1,6 @@
 -- =============================================================================
--- sql_queries.sql  —  Portfolio-grade SQL for the Citizen Sensor Tracker
--- Target: db/citizen_sensor.db  (SQLite)
+-- sql_queries.sql  —  Portfolio-grade SQL for the Chicago Air Quality Explorer
+-- Target: db/chicago_air_quality.db  (SQLite)
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────

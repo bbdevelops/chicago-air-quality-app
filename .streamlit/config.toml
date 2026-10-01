@@ -1,6 +1,8 @@
 [server]
 headless = true
-enableCORS = true
+# CORS is disabled so that XSRF protection stays active. Streamlit silently
+# disables XSRF protection when CORS is enabled, so these two must not both be true.
+enableCORS = false
 enableXsrfProtection = true
 
 [browser]

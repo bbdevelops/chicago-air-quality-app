@@ -20,35 +20,25 @@ Respectful API usage:
   - $where date filter to limit payload
 """
 
-import os
+import argparse
 import sys
 import time
-import argparse
-import logging
-from pathlib import Path
-import configparser
 
 import pandas as pd
-from dotenv import load_dotenv
-from sodapy import Socrata
+from _common import OPENAIR_RAW, RAW_DIR, cache_is_fresh, setup_logging
+from _socrata import load_socrata_config, load_token, make_client
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-CONFIG_FILE = PROJECT_ROOT / "config.ini"
-
-config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
-
-SOCRATA_CONFIG = config["socrata"]
-DATASET_ID = SOCRATA_CONFIG["openair_dataset_id"]
-DOMAIN = SOCRATA_CONFIG["domain"]
-BATCH_SIZE = int(SOCRATA_CONFIG["batch_size"])
-CACHE_MAX_AGE_HOURS = int(SOCRATA_CONFIG["cache_max_age_hours"])
-START_DATE = SOCRATA_CONFIG["start_date"]
-APP_TOKEN_ENV_VAR = SOCRATA_CONFIG["app_token_env_var"]
-APP_SECRET_ENV_VAR = SOCRATA_CONFIG["app_secret_env_var"]
+_cfg = load_socrata_config()
+DATASET_ID = _cfg["openair_dataset_id"]
+DOMAIN = _cfg["domain"]
+BATCH_SIZE = _cfg["batch_size"]
+CACHE_MAX_AGE_HOURS = _cfg["cache_max_age_hours"]
+START_DATE = _cfg["start_date"]
+APP_TOKEN_ENV_VAR = _cfg["app_token_env_var"]
+APP_SECRET_ENV_VAR = _cfg["app_secret_env_var"]
 
 
 # Only pull the columns we need — keeps payload small
@@ -63,32 +53,12 @@ SELECT_COLS = (
     "latitude, longitude"
 )
 
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-CACHE_FILE = RAW_DIR / "openair_daily.csv"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-)
-log = logging.getLogger(__name__)
+log = setup_logging(__name__)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def cache_is_fresh(path: Path, max_age_hours: float) -> bool:
-    if not path.exists():
-        return False
-    age_hours = (time.time() - path.stat().st_mtime) / 3600
-    return age_hours < max_age_hours
-
-
-def _make_client(app_token: str | None, app_secret: str | None, timeout: int = 120) -> Socrata:
-    """Create a Socrata client with optional HTTP Basic Auth."""
-    if app_token and app_secret:
-        return Socrata(DOMAIN, app_token, username=app_token,
-                       password=app_secret, timeout=timeout)
-    return Socrata(DOMAIN, app_token, timeout=timeout)
 
 
 def pull_openair(app_token: str | None, app_secret: str | None = None) -> pd.DataFrame:
@@ -115,7 +85,7 @@ def pull_openair(app_token: str | None, app_secret: str | None = None) -> pd.Dat
         if attempt > 0 and tok == app_token and sec == app_secret:
             continue
         try:
-            client = _make_client(tok, sec)
+            client = make_client(DOMAIN, tok, sec)
             log.info("Pulling Open Air Day Aggregations since %s (auth attempt %d) …",
                      START_DATE, attempt + 1)
             log.info("  GET  offset=%d  limit=%d", offset, BATCH_SIZE)
@@ -172,21 +142,11 @@ def main() -> None:
     parser.add_argument("--force", action="store_true", help="Ignore cache and re-pull")
     args = parser.parse_args()
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    app_token = os.getenv(APP_TOKEN_ENV_VAR)
-    app_secret = os.getenv(APP_SECRET_ENV_VAR)
+    app_token, app_secret = load_token(APP_TOKEN_ENV_VAR, APP_SECRET_ENV_VAR)
 
-    if not app_token or app_token.startswith("PASTE"):
-        log.warning(
-            f"No valid {APP_TOKEN_ENV_VAR} in .env — throttled to 1 000 req/hr.  "
-            "Register free: https://data.cityofchicago.org/profile/edit/developer"
-        )
-        app_token = None
-        app_secret = None
-
-    if not args.force and cache_is_fresh(CACHE_FILE, CACHE_MAX_AGE_HOURS):
-        log.info("Cache is fresh (%s). Use --force to re-pull.", CACHE_FILE)
-        df = pd.read_csv(CACHE_FILE)
+    if not args.force and cache_is_fresh(OPENAIR_RAW, CACHE_MAX_AGE_HOURS):
+        log.info("Cache is fresh (%s). Use --force to re-pull.", OPENAIR_RAW)
+        df = pd.read_csv(OPENAIR_RAW)
         log.info("Loaded %d cached rows.", len(df))
         return
 
@@ -213,11 +173,10 @@ def main() -> None:
         if candidate in df.columns:
             df[candidate] = pd.to_numeric(df[candidate], errors="coerce")
 
-    df.to_csv(CACHE_FILE, index=False)
-    log.info("Saved %d rows → %s", len(df), CACHE_FILE)
+    df.to_csv(OPENAIR_RAW, index=False)
+    log.info("Saved %d rows → %s", len(df), OPENAIR_RAW)
 
     # Summary
-    time_col = "startofperiod" if "startofperiod" in df.columns else "time"
     if time_col in df.columns:
         log.info(
             "Date range: %s → %s",
