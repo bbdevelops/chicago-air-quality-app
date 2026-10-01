@@ -5,6 +5,8 @@ An end-to-end data pipeline that links **311 air-pollution complaints** with
 citizen complaints align with measured air quality across Chicago's
 neighborhoods.
 
+See active demo here:
+<a href="https://chicago-air-quality-app.onrender.com/">https://chicago-air-quality-app.onrender.com/</a>
 ---
 
 ## Project Goals
