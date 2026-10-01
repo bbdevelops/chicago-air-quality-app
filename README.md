@@ -173,7 +173,7 @@ using the same pipeline outputs in `data/clean/`:
 ```bash
 pip install -r requirements.txt
 python run_pipeline.py --skip-api
-python -m python -m streamlit run streamlit_app/app.py
+python -m streamlit run streamlit_app/app.py
 ```
 
 If you see `ModuleNotFoundError: No module named 'streamlit_app'`, pull the
@@ -192,33 +192,20 @@ Then reverse-proxy `:8501` behind your domain (Nginx/Caddy/Traefik).
 
 Option B: Native process manager (systemd/PM2/supervisor)
 
-- Run `python -m python -m streamlit run streamlit_app/app.py --server.address=0.0.0.0 --server.port=8501`
+- Run `python -m streamlit run streamlit_app/app.py --server.address=0.0.0.0 --server.port=8501`
 - Put a reverse proxy in front of it for HTTPS and domain routing.
 
 ---
 
 ## Testing
 
-Unit tests are under `tests/` and target core pipeline and analytics logic:
-
-- nearest-sensor assignment helpers
-- neighborhood point-in-polygon / snap fallback logic
-- hourly-to-daily weighted re-aggregation logic
-- Streamlit analytics functions (filters, aggregations, lag metrics, spike windows)
-- neighborhood IDW estimation logic and unavailable-fallback behavior
-- EPA AQI conversion + category/health helpers (`pm25_to_aqi`, `aqi_category`, `add_aqi_columns`)
-- spike-window concordance (vectorized; percentile or absolute threshold)
-- EPA AQS reference cleaner (`clean_epa_frame`)
+Unit tests are under `tests/` and target core pipeline and analytics logic. See [TESTING.md](TESTING.md) for details.
 
 Run tests:
 
 ```bash
 pytest
 ```
-
-Detailed testing guide (including manual false-positive checks):
-
-- `TESTING.md`
 
 ---
 
