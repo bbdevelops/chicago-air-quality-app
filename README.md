@@ -27,36 +27,33 @@ chicago-air-quality-app/
 ├── .env                            # Local API tokens (ignored by git)
 ├── .env.example                    # Safe template for token variables
 ├── requirements.txt                # App + pipeline dependencies
-├── requirements-notebooks.txt      # Optional notebook-only dependencies
+├── pyproject.toml                  # Project + testing configuration
+├── aqi.py                          # AQI calculation functions
 │
 ├── scripts/
 │   ├── extract_complaints.py       # Pull 311 complaints from Socrata API
 │   ├── extract_openair.py          # Pull Open Air daily aggregations from Socrata
+│   ├── extract_epa.py              # Pull EPA AQS regulatory monitors (Cook County)
 │   ├── clean_complaints.py         # Clean complaints, assign nearest sensor
 │   ├── clean_openair.py            # Clean sensor data, flag PM2.5 outliers
+│   ├── clean_epa.py                # Clean EPA AQS data
 │   ├── export_neighborhoods_geojson.py  # Convert boundary CSV → GeoJSON
 │   ├── assign_neighborhoods.py     # Point-in-polygon neighborhood assignment
 │   ├── merge_datasets.py           # Join sensor readings + complaint counts
 │   ├── build_neighborhood_summary.py   # One-row-per-neighborhood summary
-│   ├── aggregate_hourly_to_daily.py    # Off-pipeline: hourly raw CSV → daily schema
 │   ├── load_sqlite.py              # Load clean CSVs → SQLite database
-│   └── sql_queries.sql             # Example analytical SQL queries
+│   ├── sql_queries.sql             # Example analytical SQL queries
+│   ├── _common.py                  # Shared logic and paths
+│   ├── _socrata.py                 # Shared Socrata client setup
+│   └── _neighborhoods.py           # Shared spatial joins
 │
 ├── data/
 │   ├── Neighborhoods_2012b_20260228.csv  # Official Chicago neighborhood boundaries
 │   ├── raw/                        # Raw API extracts (cached CSVs)
-│   │   ├── cdph_air_complaints.csv
-│   │   └── openair_daily.csv
 │   └── clean/                      # Cleaned, analysis-ready outputs
-│       ├── complaints_cleaned.csv
-│       ├── complaints_daily_by_sensor.csv
-│       ├── openair_daily_cleaned.csv
-│       ├── merged_complaints_air.csv   # ← Primary analysis dataset
-│       ├── neighborhood_summary.csv
-│       └── chicago_neighborhoods.geojson
 │
 ├── db/
-│   └── citizen_sensor.db           # SQLite database (3 tables)
+│   └── chicago_air_quality.db      # SQLite database (3 tables)
 │
 ├── notebooks/
 │   ├── eda.ipynb                   # Exploratory analysis notebook
@@ -64,7 +61,12 @@ chicago-air-quality-app/
 │
 ├── logs/                           # Pipeline run logs (timestamped)
 │
+├── tests/                          # Pytest suite
+│
 └── streamlit_app/                  # Streamlit dashboard app
+    ├── app.py                      # Main entrypoint
+    ├── dashboard_data.py           # Data processing logic
+    └── theme.py                    # Accessible UI theme definition
 ```
 
 ---
@@ -126,8 +128,8 @@ python run_pipeline.py --with-epa
 
 - Open `notebooks/eda.ipynb` for exploratory analysis
 - Open `notebooks/complaint_air_correlation.ipynb` for guided correlation analysis
-- Launch Streamlit app: `python -m streamlit run streamlit_app/app.py`
-- Query `db/citizen_sensor.db` with any SQL client
+- Launch Streamlit app: `python -m python -m streamlit run streamlit_app/app.py`
+- Query `db/chicago_air_quality.db` with any SQL client
 
 ---
 
@@ -171,7 +173,7 @@ using the same pipeline outputs in `data/clean/`:
 ```bash
 pip install -r requirements.txt
 python run_pipeline.py --skip-api
-python -m streamlit run streamlit_app/app.py
+python -m python -m streamlit run streamlit_app/app.py
 ```
 
 If you see `ModuleNotFoundError: No module named 'streamlit_app'`, pull the
@@ -190,7 +192,7 @@ Then reverse-proxy `:8501` behind your domain (Nginx/Caddy/Traefik).
 
 Option B: Native process manager (systemd/PM2/supervisor)
 
-- Run `python -m streamlit run streamlit_app/app.py --server.address=0.0.0.0 --server.port=8501`
+- Run `python -m python -m streamlit run streamlit_app/app.py --server.address=0.0.0.0 --server.port=8501`
 - Put a reverse proxy in front of it for HTTPS and domain routing.
 
 ---
@@ -222,22 +224,7 @@ Detailed testing guide (including manual false-positive checks):
 
 ## Pipeline Steps
 
-| # | Step | Script | Description |
-|---|------|--------|-------------|
-| 1 | Extract complaints | `extract_complaints.py` | Pull CDPH 311 air-pollution work orders from Socrata |
-| 2 | Extract Open Air | `extract_openair.py` | Pull daily PM2.5/NO2 aggregations from Socrata |
-| 3 | Clean complaints | `clean_complaints.py` | Parse dates, assign nearest sensor (Haversine) |
-| 4 | Clean Open Air | `clean_openair.py` | UTC→Chicago time, drop nulls, flag outliers |
-| 5 | Export GeoJSON | `export_neighborhoods_geojson.py` | Convert boundary CSV → GeoJSON for mapping |
-| 6 | Assign neighborhoods | `assign_neighborhoods.py` | Point-in-polygon spatial join for all datasets |
-| 7 | Merge datasets | `merge_datasets.py` | Left-join sensors + complaints, add lag/lead features |
-| 8 | Neighborhood summary | `build_neighborhood_summary.py` | Aggregate stats per neighborhood |
-| 9 | Load SQLite | `load_sqlite.py` | Write 3 tables to SQLite database |
-
-Running with `--with-epa` inserts two **optional** steps: `extract_epa.py` (pull
-EPA AQS reference monitors for Cook County) and `clean_epa.py` (→
-`data/clean/epa_reference_daily.csv`). These are skipped by default, so a missing
-EPA key or AQS outage never breaks the core pipeline.
+Run python run_pipeline.py --help for the full list of steps.
 
 ---
 
@@ -279,7 +266,7 @@ The following were planned but removed as non-functional stubs:
 
 | Component | Reason | Status |
 |-----------|--------|--------|
-| EPA AirNow (real-time) integration | AirNow API stub, extraction never implemented | **Removed** — superseded by the EPA **AQS** integration below (regulatory monitors), added as an optional reference source (`--with-epa`; see [Data Sources](#data-sources)) |
+| EPA AirNow (real-time) integration | AirNow API stub, extraction never implemented | **Removed** — Removed in initial versions, re-added as optional EPA AQS integration (regulatory monitors), added as an optional reference source (`--with-epa`; see [Data Sources](#data-sources)) |
 | Visual Crossing weather | API stub only, no downstream usage | **Removed** — can be re-added if weather correlation is needed |
 | Census data cleaning | Stub only, no downstream usage | **Removed** — can be re-added for demographic analysis |
 
