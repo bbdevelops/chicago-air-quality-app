@@ -27,8 +27,11 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run data pipeline
+        env:
+          SOCRATA_APP_TOKEN: ${{ secrets.SOCRATA_APP_TOKEN }}
+          SOCRATA_APP_SECRET: ${{ secrets.SOCRATA_APP_SECRET }}
         run: |
-          python scripts/merge_datasets.py
+          python run_pipeline.py --force
 
       - name: Commit and push changes
         run: |
