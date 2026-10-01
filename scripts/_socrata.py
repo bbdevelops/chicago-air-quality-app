@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
-
-from dotenv import load_dotenv
-from sodapy import Socrata
 
 from _common import PROJECT_ROOT, get_config_section
+from dotenv import load_dotenv
+from sodapy import Socrata
 
 log = logging.getLogger(__name__)
 

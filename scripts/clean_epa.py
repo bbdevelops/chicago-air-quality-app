@@ -16,7 +16,6 @@ value per site/day: mean of ``arithmetic_mean`` and the max reported ``aqi``
 from __future__ import annotations
 
 import pandas as pd
-
 from _common import CLEAN_DIR, EPA_CLEANED, EPA_RAW, setup_logging
 
 PM25_PARAM = "88101"

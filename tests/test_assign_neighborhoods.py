@@ -1,12 +1,11 @@
 from pathlib import Path
 
 import pandas as pd
-
-from scripts.assign_neighborhoods import assign_neighborhood
-from scripts._neighborhoods import load_boundaries
-
-
 import pytest
+
+from scripts._neighborhoods import load_boundaries
+from scripts.assign_neighborhoods import assign_neighborhood
+
 
 @pytest.fixture
 def mock_neighborhoods(tmp_path: Path):

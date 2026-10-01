@@ -25,7 +25,6 @@ Output
 """
 
 import pandas as pd
-
 from _common import COMPLAINTS_CLEANED, MERGED_FILE, OPENAIR_CLEANED, setup_logging
 
 log = setup_logging(__name__)

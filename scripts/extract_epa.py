@@ -33,9 +33,8 @@ from datetime import date, datetime
 
 import pandas as pd
 import requests
+from _common import EPA_RAW, PROJECT_ROOT, RAW_DIR, cache_is_fresh, setup_logging
 from dotenv import load_dotenv
-
-from _common import EPA_RAW, RAW_DIR, PROJECT_ROOT, cache_is_fresh, setup_logging
 
 CONFIG_FILE = PROJECT_ROOT / "config.ini"
 config = configparser.ConfigParser()
@@ -56,8 +55,6 @@ CACHE_MAX_AGE_HOURS = int(config["socrata"].get("cache_max_age_hours", "24"))
 
 log = setup_logging(__name__)
 
-logging.basicConfig(
-    level=logging.INFO,
 def _year_chunks(start: date, end: date) -> list[tuple[str, str]]:
     """Split [start, end] into (bdate, edate) YYYYMMDD strings per calendar year.
 

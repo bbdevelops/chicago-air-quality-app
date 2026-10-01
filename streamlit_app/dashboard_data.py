@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,46 +11,47 @@ from shapely.geometry import shape
 
 # ── AQI constants and functions — single source of truth is aqi.py ─────────
 try:
-    from aqi import (
-        AQI_CATEGORIES,
-        NO2_AQI_BREAKPOINTS,
-        PM25_AQI_BREAKPOINTS,
-        _AQI_UNAVAILABLE,
-        aqi_category,
-        aqi_health_message,
-        haversine_km as _haversine_km,
-        no2_to_aqi,
-        pm25_to_aqi,
-    )
+    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
+    from aqi import haversine_km as _haversine_km
 except ModuleNotFoundError:
     # Fallback for direct-script execution where repo root isn't on sys.path
     import sys
+
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from aqi import (
-        AQI_CATEGORIES,
-        NO2_AQI_BREAKPOINTS,
-        PM25_AQI_BREAKPOINTS,
-        _AQI_UNAVAILABLE,
-        aqi_category,
-        aqi_health_message,
-        haversine_km as _haversine_km,
-        no2_to_aqi,
-        pm25_to_aqi,
-    )
+    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
+    from aqi import haversine_km as _haversine_km
+
+__all__ = [
+    "add_aqi_columns",
+    "aqi_category",
+    "aqi_health_message",
+    "build_city_daily_metrics",
+    "build_neighborhood_metrics",
+    "build_sensor_snapshot",
+    "compute_lag_correlations",
+    "compute_spike_concordance",
+    "enrich_neighborhood_metrics_with_estimates",
+    "filter_by_date_range",
+    "no2_to_aqi",
+    "pm25_to_aqi",
+]
 
 
 def add_aqi_columns(df: pd.DataFrame, pm25_col: str = "pm25_mean") -> pd.DataFrame:
-    """Add ``pm25_aqi`` column from a PM2.5 column.
+    """Add ``pm25_aqi`` and ``aqi_category`` columns from a PM2.5 column.
 
-    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI.
+    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI and
+    ``Unavailable`` category.
     Returns a copy; input is not mutated.
     """
     out = df.copy()
     if pm25_col not in out.columns:
         out["pm25_aqi"] = np.nan
+        out["aqi_category"] = "Unavailable"
         return out
 
     out["pm25_aqi"] = pd.to_numeric(out[pm25_col], errors="coerce").map(pm25_to_aqi)
+    out["aqi_category"] = out["pm25_aqi"].map(lambda value: aqi_category(value)[0])
     return out
 
 

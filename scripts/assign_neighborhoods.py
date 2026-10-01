@@ -22,10 +22,9 @@ Outputs (overwrites in-place)
 """
 
 import pandas as pd
-from shapely.geometry import Point
-
 from _common import COMPLAINTS_CLEANED, OPENAIR_CLEANED, setup_logging
 from _neighborhoods import load_boundaries
+from shapely.geometry import Point
 
 # Max distance (in degrees, ~1 km) to snap an unmatched point to the
 # nearest neighborhood boundary.  Points beyond this remain unassigned.

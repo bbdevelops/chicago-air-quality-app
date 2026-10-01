@@ -11,10 +11,9 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from _common import NEIGHBORHOODS_CSV
 from shapely import wkt
 from shapely.prepared import prep
-
-from _common import NEIGHBORHOODS_CSV
 
 log = logging.getLogger(__name__)
 

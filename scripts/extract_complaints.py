@@ -20,7 +20,6 @@ import sys
 import time
 
 import pandas as pd
-
 from _common import COMPLAINTS_RAW, RAW_DIR, cache_is_fresh, setup_logging
 from _socrata import load_socrata_config, load_token, make_client
 

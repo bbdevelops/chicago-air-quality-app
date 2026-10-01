@@ -20,12 +20,11 @@ Output
 """
 
 import pandas as pd
-
 from _common import (
     CLEAN_DIR,
     COMPLAINTS_CLEANED,
-    NEIGHBORHOODS_CSV,
     NEIGHBORHOOD_SUMMARY,
+    NEIGHBORHOODS_CSV,
     OPENAIR_CLEANED,
     setup_logging,
 )

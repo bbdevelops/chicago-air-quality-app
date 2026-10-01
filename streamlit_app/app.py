@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
@@ -101,8 +102,6 @@ HOVER_EXTRA_LABELS = {
     "total_complaints": "Complaints (period)",
     "active_days": "Active sensor days",
 }
-
-from dataclasses import dataclass
 
 @dataclass
 class MapMetric:
@@ -872,9 +871,9 @@ def main() -> None:
                     f'<span style="font-size:0.75em; color:{theme["muted"]}; margin-left:3px;">{count}</span>'
                 )
             dots_html = f'<span style="margin:0 8px; color:{theme["muted"]};"> &middot; </span>'.join(dot_parts)
-            metric_label = colorbar_title_lookup[map_metric_label]
-            legend_gradient = AQI_CSS_GRADIENT if is_aqi_metric else theme["css_gradient"]
-            low_label, high_label = ("0", "500") if is_aqi_metric else ("Low", "High")
+            metric_label = metric_cfg.colorbar_title
+            legend_gradient = AQI_CSS_GRADIENT if metric_cfg.is_aqi else theme["css_gradient"]
+            low_label, high_label = ("0", "500") if metric_cfg.is_aqi else ("Low", "High")
             st.markdown(
                 f"""
                 <div class="mobile-map-legend"

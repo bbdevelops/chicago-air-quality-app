@@ -11,10 +11,9 @@ Output:  data/clean/chicago_neighborhoods.geojson
 import json
 
 import pandas as pd
+from _common import CLEAN_DIR, NEIGHBORHOODS_CSV, NEIGHBORHOODS_GEOJSON, setup_logging
 from shapely import wkt
 from shapely.geometry import mapping
-
-from _common import CLEAN_DIR, NEIGHBORHOODS_CSV, NEIGHBORHOODS_GEOJSON, setup_logging
 
 log = setup_logging(__name__)
 
