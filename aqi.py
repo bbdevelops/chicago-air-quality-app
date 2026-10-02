@@ -1,6 +1,11 @@
 """
 aqi.py — Single source of truth for AQI constants, breakpoints, and helpers.
 
+Purpose: EPA AQI maths, categories/colors, key PM2.5 thresholds and the haversine distance helper.
+Inputs:  plain numbers or pandas Series (concentrations in ug/m3 for PM2.5, ppb for NO2).
+Outputs: AQI values, (label, color) categories, health messages, Plotly/CSS colorscales.
+Used by: scripts/ (pipeline) and streamlit_app/ (dashboard); keep it free of Streamlit imports.
+
 Importable by both the pipeline (scripts/) and the dashboard (streamlit_app/).
 
 All PM2.5 breakpoints are the **2024-revised** 24-hour values (effective
@@ -125,6 +130,24 @@ def aqi_health_message(aqi: float) -> str:
         if value <= i_hi:
             return message
     return AQI_CATEGORIES[-1][4]
+
+
+def add_aqi_columns(df: pd.DataFrame, pm25_col: str = "pm25_mean") -> pd.DataFrame:
+    """Add ``pm25_aqi`` and ``aqi_category`` columns from a PM2.5 column.
+
+    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI and
+    ``Unavailable`` category.
+    Returns a copy; input is not mutated.
+    """
+    out = df.copy()
+    if pm25_col not in out.columns:
+        out["pm25_aqi"] = np.nan
+        out["aqi_category"] = "Unavailable"
+        return out
+
+    out["pm25_aqi"] = pd.to_numeric(out[pm25_col], errors="coerce").map(pm25_to_aqi)
+    out["aqi_category"] = out["pm25_aqi"].map(lambda value: aqi_category(value)[0])
+    return out
 
 
 # ── Theme helpers (derived from AQI_CATEGORIES) ───────────────────────────

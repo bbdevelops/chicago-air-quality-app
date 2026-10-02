@@ -59,6 +59,7 @@ chicago-air-quality-app/
 │
 ├── notebooks/
 │   ├── eda.ipynb                   # Exploratory analysis notebook
+│   ├── architecture_tour.ipynb    # Step-by-step tour of the dashboard's data layer
 │   └── complaint_air_correlation.ipynb  # Guided correlation walkthrough
 │
 ├── logs/                           # Pipeline run logs (timestamped)
@@ -66,8 +67,17 @@ chicago-air-quality-app/
 ├── tests/                          # Pytest suite
 │
 └── streamlit_app/                  # Streamlit dashboard app
-    ├── app.py                      # Main entrypoint
-    ├── dashboard_data.py           # Data processing logic
+    ├── app.py                      # Entrypoint: load -> sidebar -> filter -> render
+    ├── sidebar.py                  # Filter widgets -> SidebarState
+    ├── banner.py                   # AQI banner + KPI cards
+    ├── constants.py                # Labels, map metrics, map defaults
+    ├── map_layers.py               # Map overlays (boundaries, sensors, complaints)
+    ├── views/                      # One module per tab
+    ├── loading.py                  # Read + validate data/clean files
+    ├── metrics.py                  # Filtering and aggregation
+    ├── estimation.py               # IDW estimates for uncovered neighborhoods
+    ├── analytics.py                # Lead-lag and spike analysis
+    ├── dashboard_data.py           # Re-exports the data layer above
     └── theme.py                    # Accessible UI theme definition
 ```
 
@@ -141,7 +151,9 @@ The repository now includes a Streamlit dashboard that mirrors the Tableau workf
 using the same pipeline outputs in `data/clean/`:
 
 - `streamlit_app/app.py` — UI and visualizations
-- `streamlit_app/dashboard_data.py` — reusable analytics functions
+- `streamlit_app/loading.py`, `metrics.py`, `estimation.py`, `analytics.py` — reusable analytics functions (also importable via `streamlit_app/dashboard_data.py`)
+
+**Understanding the code:** start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (module map and data flow), then [docs/LIFE_OF_A_RERUN.md](docs/LIFE_OF_A_RERUN.md) (how one widget change runs through the code). Extending it? See [docs/HOW_TO.md](docs/HOW_TO.md). For a runnable walkthrough with real data, open `notebooks/architecture_tour.ipynb`.
 
 ### Features
 

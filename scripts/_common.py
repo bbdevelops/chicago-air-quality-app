@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import configparser
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -18,6 +19,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 RAW_DIR = DATA_DIR / "raw"
 CLEAN_DIR = DATA_DIR / "clean"
+
+# Scripts run as standalone subprocesses (run_pipeline.py) only get their own
+# directory on sys.path, so `from aqi import ...` would otherwise fail.
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 # ── Canonical filenames (single source of truth) ───────────────────────────
 NEIGHBORHOODS_CSV = DATA_DIR / "Neighborhoods_2012b_20260228.csv"
@@ -43,6 +49,12 @@ _config.read(CONFIG_FILE)
 def get_config_section(section: str) -> configparser.SectionProxy:
     """Return a config.ini section proxy."""
     return _config[section]
+
+
+# Complaint-to-sensor spatial join threshold — the only [cleaning] value not
+# already owned by aqi.py (which is the single source of truth for the
+# PM2.5 outlier bounds).
+MAX_SENSOR_DISTANCE_M = float(get_config_section("cleaning")["max_sensor_distance_m"])
 
 
 # ── Logging ────────────────────────────────────────────────────────────────

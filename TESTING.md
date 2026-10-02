@@ -18,12 +18,16 @@ The suite currently covers:
   - `weighted_reaggregate_daily`
 - `scripts/clean_epa.py`
   - `clean_epa_frame` (collapses raw AQS daily rows to one PM2.5/NO2 row per site/day)
-- `streamlit_app/dashboard_data.py`
+- `streamlit_app/` data layer (imported through `dashboard_data.py`)
   - filtering, city/day aggregation, neighborhood-preserving joins,
     lag correlations, and spike-window summaries (vectorized; percentile or
     absolute threshold)
+  - IDW neighborhood estimates, checked against an independent inverse-distance formula
   - EPA AQI helpers: `pm25_to_aqi`, `no2_to_aqi`, `aqi_category`,
     `aqi_health_message`, `add_aqi_columns`
+- `streamlit_app/app.py` (`tests/test_app_smoke.py`)
+  - runs the real app headlessly on synthetic data across themes, map metrics and
+    map modes, and checks its imports resolve when only the app folder is on `sys.path`
 
 ## Run Tests
 
