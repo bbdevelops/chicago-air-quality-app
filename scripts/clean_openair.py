@@ -104,6 +104,21 @@ def main() -> None:
         keep.insert(4, "no2_mean")
     df = df[[c for c in keep if c in df.columns]]
 
+    # ---- Aggregate duplicates by sensor_name and date -----------------------
+    agg_dict = {
+        "sensor_id": "first",
+        "pm25_mean": "mean",
+        "lat": "median",
+        "lon": "median",
+        "pm25_outlier": "max",
+    }
+    if "no2_mean" in df.columns:
+        agg_dict["no2_mean"] = "mean"
+
+    before_agg = len(df)
+    df = df.groupby(["sensor_name", "date"], as_index=False).agg(agg_dict)
+    log.info("Aggregated %d rows into %d unique sensor-days.", before_agg, len(df))
+
     # ---- Save ---------------------------------------------------------------
     df.to_csv(OPENAIR_CLEANED, index=False)
     log.info("Saved cleaned file → %s  (%d rows)", OPENAIR_CLEANED, len(df))
