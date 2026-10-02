@@ -166,7 +166,7 @@ def render_map_tab(
     )
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        width="stretch",
         config={
             "scrollZoom": True,
             "displaylogo": False,

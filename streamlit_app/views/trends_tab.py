@@ -66,7 +66,7 @@ def render_trends_tab(ui: SidebarState, city_daily: pd.DataFrame) -> None:
         style_fig(trend, theme)
         trend.update_yaxes(title_text=trend_value_title, secondary_y=False)
         trend.update_yaxes(title_text="Complaint count", secondary_y=True)
-        st.plotly_chart(trend, use_container_width=True)
+        st.plotly_chart(trend, width="stretch")
 
         if ui.calendar_metric_label in POLLUTANTS:
             pol_cfg = POLLUTANTS[ui.calendar_metric_label]
@@ -119,4 +119,4 @@ def render_trends_tab(ui: SidebarState, city_daily: pd.DataFrame) -> None:
                 )
                 calendar_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
                 style_fig(calendar_fig, theme, axes=False)
-                st.plotly_chart(calendar_fig, use_container_width=True)
+                st.plotly_chart(calendar_fig, width="stretch")

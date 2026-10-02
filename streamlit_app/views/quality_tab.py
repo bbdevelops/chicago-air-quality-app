@@ -36,7 +36,7 @@ def render_quality_tab(map_metrics: pd.DataFrame) -> None:
     )
     st.dataframe(
         no_coverage[quality_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -64,6 +64,6 @@ def render_quality_tab(map_metrics: pd.DataFrame) -> None:
     present_metrics_columns = [c for c in metrics_columns if c in map_metrics.columns]
     st.dataframe(
         map_metrics[present_metrics_columns].rename(columns=COLUMN_LABELS).sort_values("Neighborhood"),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )

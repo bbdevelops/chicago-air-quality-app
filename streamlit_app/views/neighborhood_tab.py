@@ -47,4 +47,4 @@ def render_neighborhood_tab(ui: SidebarState, map_metrics: pd.DataFrame) -> None
         rank_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
         style_fig(rank_fig, theme)
         rank_fig.update_yaxes(categoryorder="total ascending")
-        st.plotly_chart(rank_fig, use_container_width=True)
+        st.plotly_chart(rank_fig, width="stretch")

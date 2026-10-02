@@ -57,7 +57,7 @@ anticipatory or odor-driven reporting.
         )
         lag_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
         style_fig(lag_fig, theme)
-        st.plotly_chart(lag_fig, use_container_width=True)
+        st.plotly_chart(lag_fig, width="stretch")
 
         valid = lag_df.dropna(subset=["correlation"]).copy()
         if not valid.empty:
@@ -98,4 +98,4 @@ anticipatory or odor-driven reporting.
         spike_fig.update_yaxes(title="Mean complaints")
         spike_fig.update_layout(margin={"l": 0, "r": 0, "t": 45, "b": 0})
         style_fig(spike_fig, theme)
-        st.plotly_chart(spike_fig, use_container_width=True)
+        st.plotly_chart(spike_fig, width="stretch")
