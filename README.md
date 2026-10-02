@@ -66,7 +66,12 @@ chicago-air-quality-app/
 ├── tests/                          # Pytest suite
 │
 └── streamlit_app/                  # Streamlit dashboard app
-    ├── app.py                      # Main entrypoint
+    ├── app.py                      # Entrypoint: load -> sidebar -> filter -> render
+    ├── sidebar.py                  # Filter widgets -> SidebarState
+    ├── banner.py                   # AQI banner + KPI cards
+    ├── constants.py                # Labels, map metrics, map defaults
+    ├── map_layers.py               # Map overlays (boundaries, sensors, complaints)
+    ├── views/                      # One module per tab
     ├── loading.py                  # Read + validate data/clean files
     ├── metrics.py                  # Filtering and aggregation
     ├── estimation.py               # IDW estimates for uncovered neighborhoods

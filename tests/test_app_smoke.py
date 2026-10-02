@@ -16,6 +16,7 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 import streamlit_app.dashboard_data as dashboard_data
+import streamlit_app.loading as loading
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "streamlit_app" / "app.py")
 
@@ -111,7 +112,7 @@ def synthetic_pipeline_data(monkeypatch: pytest.MonkeyPatch) -> dashboard_data.P
     data = dashboard_data.PipelineData(
         complaints=complaints, merged=merged, summary=summary, neighborhoods_geojson=geojson
     )
-    monkeypatch.setattr(dashboard_data, "load_pipeline_data", lambda *_a, **_k: data)
+    monkeypatch.setattr(loading, "load_pipeline_data", lambda *_a, **_k: data)
     return data
 
 
