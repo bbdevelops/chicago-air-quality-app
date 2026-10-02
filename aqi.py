@@ -127,6 +127,24 @@ def aqi_health_message(aqi: float) -> str:
     return AQI_CATEGORIES[-1][4]
 
 
+def add_aqi_columns(df: pd.DataFrame, pm25_col: str = "pm25_mean") -> pd.DataFrame:
+    """Add ``pm25_aqi`` and ``aqi_category`` columns from a PM2.5 column.
+
+    Vectorized over the frame. Rows with a missing/NaN PM2.5 get NaN AQI and
+    ``Unavailable`` category.
+    Returns a copy; input is not mutated.
+    """
+    out = df.copy()
+    if pm25_col not in out.columns:
+        out["pm25_aqi"] = np.nan
+        out["aqi_category"] = "Unavailable"
+        return out
+
+    out["pm25_aqi"] = pd.to_numeric(out[pm25_col], errors="coerce").map(pm25_to_aqi)
+    out["aqi_category"] = out["pm25_aqi"].map(lambda value: aqi_category(value)[0])
+    return out
+
+
 # ── Theme helpers (derived from AQI_CATEGORIES) ───────────────────────────
 def build_aqi_colorscale(max_aqi: int = 500) -> list[list[float | str]]:
     """Build a Plotly-compatible stepped colorscale from AQI_CATEGORIES."""

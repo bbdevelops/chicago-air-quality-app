@@ -67,7 +67,11 @@ chicago-air-quality-app/
 │
 └── streamlit_app/                  # Streamlit dashboard app
     ├── app.py                      # Main entrypoint
-    ├── dashboard_data.py           # Data processing logic
+    ├── loading.py                  # Read + validate data/clean files
+    ├── metrics.py                  # Filtering and aggregation
+    ├── estimation.py               # IDW estimates for uncovered neighborhoods
+    ├── analytics.py                # Lead-lag and spike analysis
+    ├── dashboard_data.py           # Re-exports the data layer above
     └── theme.py                    # Accessible UI theme definition
 ```
 
@@ -141,7 +145,7 @@ The repository now includes a Streamlit dashboard that mirrors the Tableau workf
 using the same pipeline outputs in `data/clean/`:
 
 - `streamlit_app/app.py` — UI and visualizations
-- `streamlit_app/dashboard_data.py` — reusable analytics functions
+- `streamlit_app/loading.py`, `metrics.py`, `estimation.py`, `analytics.py` — reusable analytics functions (also importable via `streamlit_app/dashboard_data.py`)
 
 ### Features
 
