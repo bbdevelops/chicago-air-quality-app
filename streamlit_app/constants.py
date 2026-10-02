@@ -23,9 +23,9 @@ COLUMN_LABELS = {
     "pm25_map_value": "PM2.5 average (µg/m³)",
     "pm25_mean_period": "PM2.5 direct value (µg/m³)",
     "pm25_mean_estimated": "PM2.5 IDW estimate (µg/m³)",
-    "no2_map_value": "NO2 average (µg/m³)",
-    "no2_mean_period": "NO2 direct value (µg/m³)",
-    "no2_mean_estimated": "NO2 IDW estimate (µg/m³)",
+    "no2_map_value": "NO2 average (ppb)",
+    "no2_mean_period": "NO2 direct value (ppb)",
+    "no2_mean_estimated": "NO2 IDW estimate (ppb)",
     "complaints_map_value": "Complaints (period)",
     "complaints_period": "Complaints direct value",
     "complaints_estimated": "Complaints IDW estimate",
@@ -39,7 +39,7 @@ COLUMN_LABELS = {
 # used to rename the neighborhood table.
 HOVER_EXTRA_LABELS = {
     "pm25_mean": "PM2.5 average (µg/m³)",
-    "no2_mean": "NO2 average (µg/m³)",
+    "no2_mean": "NO2 average (ppb)",
     "total_complaints": "Complaints (period)",
     "active_days": "Active sensor days",
 }
@@ -71,7 +71,7 @@ class PolConfig:
 
 POLLUTANTS = {
     "PM2.5": PolConfig(column="pm25_mean", label="PM2.5", unit="µg/m³"),
-    "NO2": PolConfig(column="no2_mean", label="NO2", unit="µg/m³"),
+    "NO2": PolConfig(column="no2_mean", label="NO2", unit="ppb"),
 }
 
 CHICAGO_CENTER = {"lat": 41.8781, "lon": -87.6298}
