@@ -11,7 +11,7 @@ Output:  data/clean/chicago_neighborhoods.geojson
 import json
 
 import pandas as pd
-from _common import CLEAN_DIR, NEIGHBORHOODS_CSV, NEIGHBORHOODS_GEOJSON, setup_logging
+from _common import CLEAN_DIR, GEOJSON_FILE, NEIGHBORHOODS_CSV, setup_logging
 from shapely import wkt
 from shapely.geometry import mapping
 
@@ -47,11 +47,11 @@ def main() -> None:
         "features": features,
     }
 
-    with open(NEIGHBORHOODS_GEOJSON, "w", encoding="utf-8") as f:
+    with open(GEOJSON_FILE, "w", encoding="utf-8") as f:
         json.dump(geojson, f)
 
     log.info("Wrote %d features → %s (%.1f MB)",
-             len(features), NEIGHBORHOODS_GEOJSON, NEIGHBORHOODS_GEOJSON.stat().st_size / 1e6)
+             len(features), GEOJSON_FILE, GEOJSON_FILE.stat().st_size / 1e6)
 
 
 if __name__ == "__main__":
