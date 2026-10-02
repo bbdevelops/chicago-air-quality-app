@@ -16,7 +16,6 @@ Each theme is a plain dict so callers can read palette entries directly.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import plotly.graph_objects as go
@@ -24,12 +23,7 @@ import plotly.graph_objects as go
 # ── AQI band colorscale (derived from the shared aqi.py module) ─────────────
 # Instead of hand-coding the stops and CSS gradient, we build them
 # programmatically from AQI_CATEGORIES (single source of truth).
-try:
-    from aqi import build_aqi_colorscale, build_aqi_css_gradient
-except ModuleNotFoundError:
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from aqi import build_aqi_colorscale, build_aqi_css_gradient
+from aqi import build_aqi_colorscale, build_aqi_css_gradient
 
 AQI_COLORSCALE = build_aqi_colorscale()
 AQI_RANGE = (0, 500)

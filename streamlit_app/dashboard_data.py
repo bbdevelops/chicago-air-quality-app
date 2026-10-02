@@ -10,16 +10,8 @@ import pandas as pd
 from shapely.geometry import shape
 
 # ── AQI constants and functions — single source of truth is aqi.py ─────────
-try:
-    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
-    from aqi import haversine_km as _haversine_km
-except ModuleNotFoundError:
-    # Fallback for direct-script execution where repo root isn't on sys.path
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
-    from aqi import haversine_km as _haversine_km
+from aqi import aqi_category, aqi_health_message, no2_to_aqi, pm25_to_aqi
+from aqi import haversine_km as _haversine_km
 
 __all__ = [
     "add_aqi_columns",

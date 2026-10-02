@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -11,63 +12,38 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-try:
-    # Works when launched from project root as a package import.
-    from streamlit_app.dashboard_data import (
-        add_aqi_columns,
-        aqi_category,
-        aqi_health_message,
-        build_city_daily_metrics,
-        build_neighborhood_metrics,
-        build_sensor_snapshot,
-        compute_lag_correlations,
-        compute_spike_concordance,
-        enrich_neighborhood_metrics_with_estimates,
-        filter_by_date_range,
-        load_pipeline_data,
-        pm25_to_aqi,
-    )
-    from streamlit_app.theme import (
-        AQI_COLORSCALE,
-        AQI_CSS_GRADIENT,
-        AQI_RANGE,
-        chrome_css,
-        get_theme,
-        style_fig,
-    )
-except ModuleNotFoundError:
-    # Works when Streamlit executes this file as a direct script.
-    from dashboard_data import (  # type: ignore
-        add_aqi_columns,
-        aqi_category,
-        aqi_health_message,
-        build_city_daily_metrics,
-        build_neighborhood_metrics,
-        build_sensor_snapshot,
-        compute_lag_correlations,
-        compute_spike_concordance,
-        enrich_neighborhood_metrics_with_estimates,
-        filter_by_date_range,
-        load_pipeline_data,
-        pm25_to_aqi,
-    )
-    from theme import (  # type: ignore
-        AQI_COLORSCALE,
-        AQI_CSS_GRADIENT,
-        AQI_RANGE,
-        chrome_css,
-        get_theme,
-        style_fig,
-    )
+# `streamlit run` only puts this file's folder on sys.path, so add the repo root
+# once here and every module can use plain `streamlit_app.*` / `aqi` imports.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
+from aqi import aqi_category, aqi_health_message, pm25_to_aqi
+from streamlit_app.dashboard_data import (
+    add_aqi_columns,
+    build_city_daily_metrics,
+    build_neighborhood_metrics,
+    build_sensor_snapshot,
+    compute_lag_correlations,
+    compute_spike_concordance,
+    enrich_neighborhood_metrics_with_estimates,
+    filter_by_date_range,
+    load_pipeline_data,
+)
+from streamlit_app.theme import (
+    AQI_COLORSCALE,
+    AQI_CSS_GRADIENT,
+    AQI_RANGE,
+    chrome_css,
+    get_theme,
+    style_fig,
+)
 
 st.set_page_config(
     page_title="Chicago Air Quality Explorer",
     page_icon=":wind_face:",
     layout="wide",
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Human-readable labels for NEIGHBORHOOD-level columns — used both for choropleth
 # hover cards and the Coverage QA tables. One source of truth so the two views

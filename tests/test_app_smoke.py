@@ -5,6 +5,9 @@ Catches exceptions in any tab/theme/map-mode, which no unit test of the data lay
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +18,27 @@ from streamlit.testing.v1 import AppTest
 import streamlit_app.dashboard_data as dashboard_data
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "streamlit_app" / "app.py")
+
+
+def test_app_imports_resolve_when_only_its_own_folder_is_on_sys_path(tmp_path: Path) -> None:
+    # `streamlit run streamlit_app/app.py` puts only that folder on sys.path (pytest's
+    # pythonpath setting would otherwise hide a broken bootstrap), so test it in a clean process.
+    app = Path(APP_PATH)
+    code = (
+        "import runpy, sys\n"
+        f"sys.path[:] = [p for p in sys.path if p not in ('', {str(app.parents[1])!r})]\n"
+        f"sys.path.insert(0, {str(app.parent)!r})\n"
+        f"runpy.run_path({str(app)!r}, run_name='import_check')\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": ""},
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr[-2000:]
 
 HOODS = {
     "A": (41.10, -87.60),
