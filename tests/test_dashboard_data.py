@@ -235,6 +235,54 @@ def test_enrich_neighborhood_metrics_with_estimates_marks_unavailable_when_no_ne
     assert pd.isna(row_c["pm25_map_value"])
 
 
+def _expected_idw(sensors: pd.DataFrame, col: str, k: int, power: float, lat: float, lon: float) -> tuple[float, float]:
+    from aqi import haversine_km
+
+    dist = haversine_km(lat, lon, sensors["lat"], sensors["lon"])
+    nearest = dist.sort_values().head(k)
+    weights = 1.0 / nearest**power
+    values = sensors.loc[nearest.index, col]
+    return float((weights * values).sum() / weights.sum()), float(nearest.min())
+
+
+@pytest.mark.parametrize(("k", "power"), [(1, 2.0), (2, 2.0), (2, 3.0)])
+def test_idw_estimates_match_independent_inverse_distance_formula(sample_summary, sample_merged, sample_geojson, k, power) -> None:
+    base_metrics = build_neighborhood_metrics(sample_summary, sample_merged)
+    sensors = build_sensor_snapshot(sample_merged)
+
+    enriched = enrich_neighborhood_metrics_with_estimates(
+        base_metrics, sensors, sample_geojson, k=k, idw_power=power, max_distance_km=50.0
+    )
+
+    row_c = enriched.loc[enriched["neighborhood"] == "C"].iloc[0]
+    lat, lon = row_c["centroid_lat"], row_c["centroid_lon"]
+    for sensor_col, out_col in (
+        ("pm25_mean", "pm25_mean_estimated"),
+        ("no2_mean", "no2_mean_estimated"),
+        ("total_complaints", "complaints_estimated"),
+    ):
+        expected, nearest_km = _expected_idw(sensors, sensor_col, k, power, lat, lon)
+        assert row_c[out_col] == pytest.approx(expected)
+    assert row_c["estimated_sensor_count"] == k
+    assert row_c["estimated_nearest_km"] == pytest.approx(nearest_km)
+
+
+def test_idw_keeps_direct_values_and_estimates_only_missing_columns(sample_summary, sample_merged, sample_geojson) -> None:
+    base_metrics = build_neighborhood_metrics(sample_summary, sample_merged)
+    sensors = build_sensor_snapshot(sample_merged)
+
+    enriched = enrich_neighborhood_metrics_with_estimates(
+        base_metrics, sensors, sample_geojson, k=2, idw_power=2.0, max_distance_km=50.0
+    )
+
+    row_a = enriched.loc[enriched["neighborhood"] == "A"].iloc[0]
+    assert row_a["pm25_map_value"] == pytest.approx(20.0)  # direct mean of S1, never replaced
+    assert row_a["coverage_source"] == "direct"
+
+    row_c = enriched.loc[enriched["neighborhood"] == "C"].iloc[0]
+    assert row_c["pm25_map_value"] == pytest.approx(row_c["pm25_mean_estimated"])
+
+
 # ── AQI ─────────────────────────────────────────────────────────────────────
 def test_pm25_to_aqi_category_endpoints() -> None:
     # 2024-revised PM2.5 breakpoints: concentration -> exact AQI index endpoint.

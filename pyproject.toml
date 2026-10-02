@@ -21,6 +21,10 @@ select = ["E", "W", "F", "I", "B", "UP"]
 # The dashboard intentionally builds long f-string HTML/hovertemplate lines.
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+# app.py must extend sys.path before its first-party imports (see bootstrap comment).
+"streamlit_app/app.py" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

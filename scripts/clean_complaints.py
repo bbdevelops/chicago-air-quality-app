@@ -18,11 +18,9 @@ Outputs
 from pathlib import Path
 
 import pandas as pd
-from _common import CLEAN_DIR, COMPLAINTS_CLEANED, COMPLAINTS_RAW, OPENAIR_RAW, setup_logging
+from _common import CLEAN_DIR, COMPLAINTS_CLEANED, COMPLAINTS_RAW, MAX_SENSOR_DISTANCE_M, OPENAIR_RAW, setup_logging
 
 from aqi import haversine_km
-
-MAX_SENSOR_DISTANCE_M = 2_000  # flag complaints farther than 2 km
 
 log = setup_logging(__name__)
 

@@ -1,5 +1,10 @@
 """Theme definitions for the Chicago Air Quality Explorer.
 
+Purpose: palettes and styling helpers so charts, maps and the page chrome follow the chosen theme.
+Inputs:  a theme name from the sidebar ("Terminal" or "Accessible") and Plotly figures to style.
+Outputs: theme dicts (read palette entries by key), styled figures, and chrome CSS.
+Used by: streamlit_app/app.py, sidebar.py and every views/ tab module.
+
 Two palettes are supported and switchable at runtime from the sidebar:
 
 * **Terminal** — the original dark "matrix green" look (monospace, neon green).
@@ -16,7 +21,6 @@ Each theme is a plain dict so callers can read palette entries directly.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import plotly.graph_objects as go
@@ -24,12 +28,7 @@ import plotly.graph_objects as go
 # ── AQI band colorscale (derived from the shared aqi.py module) ─────────────
 # Instead of hand-coding the stops and CSS gradient, we build them
 # programmatically from AQI_CATEGORIES (single source of truth).
-try:
-    from aqi import build_aqi_colorscale, build_aqi_css_gradient
-except ModuleNotFoundError:
-    import sys
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from aqi import build_aqi_colorscale, build_aqi_css_gradient
+from aqi import build_aqi_colorscale, build_aqi_css_gradient
 
 AQI_COLORSCALE = build_aqi_colorscale()
 AQI_RANGE = (0, 500)

@@ -14,8 +14,7 @@ Output:  data/clean/openair_daily_cleaned.csv
 import pandas as pd
 from _common import CLEAN_DIR, OPENAIR_CLEANED, OPENAIR_RAW, setup_logging
 
-PM25_OUTLIER_UPPER = 150.0   # µg/m³ — flag but keep
-PM25_OUTLIER_LOWER = 0.0
+from aqi import PM25_OUTLIER_LOWER, PM25_OUTLIER_UPPER
 
 log = setup_logging(__name__)
 
