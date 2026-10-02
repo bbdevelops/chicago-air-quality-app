@@ -86,7 +86,7 @@ Measured on the real data (steady state, headless):
 
 - A rerun takes roughly **0.45 s**, whichever widget changed (theme, map height, IDW *k*).
 - The data work (filter, aggregate, IDW) is only about **0.1 to 0.2 s** of that.
-- Most of the rest is Plotly: building six figures and serializing them. The choropleth alone embeds the full neighborhood GeoJSON, which is why its figure is about 2 MB.
+- Most of the rest is Plotly: building six figures and serializing them. The choropleth alone embeds the neighborhood GeoJSON, which is why its figure is about 1.3 MB (it was 2.2 MB before the browser copy of the geometry was rounded to 6 decimal places, about 11 cm).
 
 So caching the filter and aggregation steps would save very little. Anything that shrinks the figures matters more.
 

@@ -102,6 +102,7 @@ The data layer (`loading`, `metrics`, `estimation`, `analytics`) never imports S
 - **One bootstrap, plain imports.** `streamlit run` only puts the script's own folder on `sys.path`. `app.py` adds the repo root once, near the top, so every other module uses ordinary `from streamlit_app.x import y` and `from aqi import z`. A test starts a clean process to guard this, because pytest's own path settings would hide a break.
 - **AQI lives in one place.** Breakpoints, colors, categories, the colorscale and the CSS gradient are all derived from `AQI_CATEGORIES` in `aqi.py`.
 - **`dashboard_data.py` is a facade.** It re-exports the data layer so tests and notebooks that import from it keep working. New code should import from the specific module.
+- **Two copies of the neighborhood geometry.** `PipelineData` carries the full-precision GeoJSON (`neighborhoods_geojson`, used for centroids and IDW, so the numbers are exact) and a copy rounded to 6 decimal places (`display_geojson`, read through `map_geojson`, used only for what is drawn). The rounded copy is built once inside the cached load, and makes map figures about 40% smaller to send to the browser. The shift is at most 5.5 cm, below a pixel at any practical zoom.
 - **`SidebarState` instead of 20 loose variables.** The sidebar returns one frozen object; views read `ui.theme`, `ui.map_mode`, and so on.
 - **Views receive data; they do not fetch it.** A tab function takes already-filtered frames. That keeps `app.py` the only place that knows the order of operations.
 

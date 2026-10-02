@@ -51,7 +51,7 @@ def render_map_tab(
 
         fig = px.choropleth_map(
             map_metrics,
-            geojson=data.neighborhoods_geojson,
+            geojson=data.map_geojson,
             locations="neighborhood",
             featureidkey="properties.neighborhood",
             color=metric_cfg.choropleth_col,
@@ -118,7 +118,7 @@ def render_map_tab(
                 title="Continuous sensor density heatmap",
             )
 
-        add_neighborhood_boundaries(fig, data.neighborhoods_geojson, theme["boundary_line"])
+        add_neighborhood_boundaries(fig, data.map_geojson, theme["boundary_line"])
 
     size_legend_bins: list[tuple[int, float]] = []
     if ui.show_sensor_markers:

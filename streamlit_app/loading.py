@@ -15,6 +15,27 @@ from typing import Any
 
 import pandas as pd
 
+# 6 decimal degrees is ~0.11 m: invisible on the map, but ~40% smaller figures sent to the browser.
+MAP_COORD_DECIMALS = 6
+
+
+def _round_coords(coords: Any, decimals: int) -> Any:
+    if coords and isinstance(coords[0], (int, float)):
+        return [round(v, decimals) for v in coords]
+    return [_round_coords(c, decimals) for c in coords]
+
+
+def round_geojson_coordinates(geojson: dict[str, Any], decimals: int = MAP_COORD_DECIMALS) -> dict[str, Any]:
+    """Return a copy of ``geojson`` with coordinates rounded; properties are untouched."""
+    features = []
+    for feature in geojson.get("features", []):
+        geometry = feature.get("geometry")
+        if geometry and "coordinates" in geometry:
+            geometry = {**geometry, "coordinates": _round_coords(geometry["coordinates"], decimals)}
+            feature = {**feature, "geometry": geometry}
+        features.append(feature)
+    return {**geojson, "features": features}
+
 
 @dataclass(frozen=True)
 class PipelineData:
@@ -22,6 +43,13 @@ class PipelineData:
     merged: pd.DataFrame
     summary: pd.DataFrame
     neighborhoods_geojson: dict[str, Any]
+    # Rounded copy for the browser. Centroids and IDW keep using the full-precision geojson above.
+    display_geojson: dict[str, Any] | None = None
+
+    @property
+    def map_geojson(self) -> dict[str, Any]:
+        """Geometry to hand to Plotly."""
+        return self.display_geojson if self.display_geojson is not None else self.neighborhoods_geojson
 
 
 def _clean_paths(project_root: Path) -> dict[str, Path]:
@@ -76,4 +104,5 @@ def load_pipeline_data(project_root: Path | None = None) -> PipelineData:
         merged=merged,
         summary=summary,
         neighborhoods_geojson=geojson,
+        display_geojson=round_geojson_coordinates(geojson),
     )
