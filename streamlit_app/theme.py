@@ -1,5 +1,10 @@
 """Theme definitions for the Chicago Air Quality Explorer.
 
+Purpose: palettes and styling helpers so charts, maps and the page chrome follow the chosen theme.
+Inputs:  a theme name from the sidebar ("Terminal" or "Accessible") and Plotly figures to style.
+Outputs: theme dicts (read palette entries by key), styled figures, and chrome CSS.
+Used by: streamlit_app/app.py, sidebar.py and every views/ tab module.
+
 Two palettes are supported and switchable at runtime from the sidebar:
 
 * **Terminal** — the original dark "matrix green" look (monospace, neon green).

@@ -1,6 +1,11 @@
 """
 aqi.py — Single source of truth for AQI constants, breakpoints, and helpers.
 
+Purpose: EPA AQI maths, categories/colors, key PM2.5 thresholds and the haversine distance helper.
+Inputs:  plain numbers or pandas Series (concentrations in ug/m3 for PM2.5, ppb for NO2).
+Outputs: AQI values, (label, color) categories, health messages, Plotly/CSS colorscales.
+Used by: scripts/ (pipeline) and streamlit_app/ (dashboard); keep it free of Streamlit imports.
+
 Importable by both the pipeline (scripts/) and the dashboard (streamlit_app/).
 
 All PM2.5 breakpoints are the **2024-revised** 24-hour values (effective

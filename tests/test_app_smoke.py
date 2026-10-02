@@ -17,6 +17,7 @@ from streamlit.testing.v1 import AppTest
 
 import streamlit_app.dashboard_data as dashboard_data
 import streamlit_app.loading as loading
+from streamlit_app.constants import MAP_METRICS
 
 APP_PATH = str(Path(__file__).resolve().parents[1] / "streamlit_app" / "app.py")
 
@@ -47,13 +48,7 @@ HOODS = {
     "C": (41.15, -87.65),  # no sensor: exercises the IDW-estimated path
 }
 
-METRICS = [
-    "Air Quality Index (PM2.5)",
-    "PM2.5 mean (selected period)",
-    "NO2 mean (selected period)",
-    "Complaints (selected period)",
-    "Sensor coverage (all-time)",
-]
+METRICS = list(MAP_METRICS)
 
 
 def _square(lat: float, lon: float, half: float = 0.02) -> dict:

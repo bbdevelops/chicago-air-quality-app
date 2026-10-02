@@ -59,6 +59,7 @@ chicago-air-quality-app/
 │
 ├── notebooks/
 │   ├── eda.ipynb                   # Exploratory analysis notebook
+│   ├── architecture_tour.ipynb    # Step-by-step tour of the dashboard's data layer
 │   └── complaint_air_correlation.ipynb  # Guided correlation walkthrough
 │
 ├── logs/                           # Pipeline run logs (timestamped)
@@ -151,6 +152,8 @@ using the same pipeline outputs in `data/clean/`:
 
 - `streamlit_app/app.py` — UI and visualizations
 - `streamlit_app/loading.py`, `metrics.py`, `estimation.py`, `analytics.py` — reusable analytics functions (also importable via `streamlit_app/dashboard_data.py`)
+
+**Understanding the code:** start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (module map and data flow), then [docs/LIFE_OF_A_RERUN.md](docs/LIFE_OF_A_RERUN.md) (how one widget change runs through the code). Extending it? See [docs/HOW_TO.md](docs/HOW_TO.md). For a runnable walkthrough with real data, open `notebooks/architecture_tour.ipynb`.
 
 ### Features
 
